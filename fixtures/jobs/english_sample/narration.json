@@ -1,0 +1,13 @@
+[
+  {
+    "gap_index": 0,
+    "start": 0.15,
+    "end": 13.35,
+    "max_duration": 12.95,
+    "language": "en-IN",
+    "text": "A convoy of dark cars stops outside a building. Several men in suits step out and walk in, entering a modern boardroom.",
+    "wav": "narration_00.wav",
+    "wav_duration": 10.87,
+    "pace": 1.05
+  }
+]

@@ -144,10 +144,18 @@ def has_audio_stream(path: Path | str) -> bool:
 # --------------------------------------------------------------------------
 
 
-def read_json(path: Path | str, default: Any = None) -> Any:
+_MISSING = object()
+
+
+def read_json(path: Path | str, default: Any = _MISSING) -> Any:
+    """Read JSON. Without `default`, a missing file raises; with it, returns it.
+
+    The sentinel matters: `default=None` must mean "return None", not "no
+    default given".
+    """
     file_path = Path(path)
     if not file_path.is_file():
-        if default is not None:
+        if default is not _MISSING:
             return default
         raise FileNotFoundError(f"Missing required file: {file_path}")
     return json.loads(file_path.read_text(encoding="utf-8"))

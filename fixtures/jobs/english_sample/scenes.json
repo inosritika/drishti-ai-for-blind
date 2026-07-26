@@ -1,0 +1,50 @@
+{
+  "summary": "Dark cars arrive outside a building; suited men get out and move inside to a modern boardroom, where a meeting begins.",
+  "beats": [
+    {
+      "start": 0.0,
+      "end": 1.0,
+      "event": "Several dark-coloured cars are parked outside a building.",
+      "entities": ["cars", "building"],
+      "intensity": 1,
+      "confidence": 0.86,
+      "uncertain_details": ["number of cars", "type of building"]
+    },
+    {
+      "start": 1.0,
+      "end": 6.5,
+      "event": "Men in suits get out of the cars and gather near the entrance.",
+      "entities": ["men in suits", "cars", "entrance"],
+      "intensity": 2,
+      "confidence": 0.81,
+      "uncertain_details": ["exact number of men", "whether they speak to each other"]
+    },
+    {
+      "start": 6.5,
+      "end": 10.0,
+      "event": "The setting changes from outside the building to an interior corridor.",
+      "entities": ["corridor"],
+      "intensity": 1,
+      "confidence": 0.64,
+      "uncertain_details": ["whether the interior is the same building"]
+    },
+    {
+      "start": 10.0,
+      "end": 13.5,
+      "event": "The men enter a modern boardroom with a long table.",
+      "entities": ["men in suits", "boardroom", "table"],
+      "intensity": 2,
+      "confidence": 0.79,
+      "uncertain_details": ["number of people already seated"]
+    },
+    {
+      "start": 13.5,
+      "end": 29.4,
+      "event": "People seated at the table face each other in alternating close-up shots.",
+      "entities": ["seated people", "table"],
+      "intensity": 1,
+      "confidence": 0.72,
+      "uncertain_details": ["who is speaking", "what is being discussed"]
+    }
+  ]
+}

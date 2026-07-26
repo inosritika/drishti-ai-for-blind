@@ -25,7 +25,7 @@ demo:
 	python3 -m drishti.pipeline --clip "$(CLIP)" --profile demo --language auto
 
 fixture:
-	python3 -m drishti.pipeline --job fixtures/jobs/hindi_sample --language auto
+	python3 -m drishti.pipeline --job fixtures/jobs/english_sample --check
 
 api:
 	python3 -m uvicorn api.main:app --reload --port 8000

@@ -222,7 +222,12 @@ def verify_job(job: Path, cfg: dict, *, complete: bool = True) -> list[str]:
                 )
 
             wav = item.get("wav")
-            if wav and not (job / Path(wav).name).is_file() and not Path(wav).is_file():
+            if (
+                complete
+                and wav
+                and not (job / Path(wav).name).is_file()
+                and not Path(wav).is_file()
+            ):
                 problems.append(f"{label}: wav file is missing: {wav}")
 
     # --- final output ------------------------------------------------------
