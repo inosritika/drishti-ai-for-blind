@@ -1296,7 +1296,7 @@
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       if (guideVoice) u.voice = guideVoice;
-      u.rate = 1.22;
+      u.rate = 1.12;
       u.onstart = () => { if (pendingGuide === text) pendingGuide = null; };
       window.speechSynthesis.speak(u);
     } catch (err) { /* stay silent, stay working */ }
