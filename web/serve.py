@@ -255,6 +255,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not block:
                     break
                 self.wfile.write(block)
+                # The public tunnel needs each part of a larger MP4 response
+                # flushed promptly. Without this, it can close the stream
+                # after its initial buffer even though the local response is
+                # complete.
+                self.wfile.flush()
                 remaining -= len(block)
 
     def do_OPTIONS(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API

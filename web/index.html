@@ -478,6 +478,34 @@
   const resultMeta = document.getElementById("result-meta");
   let playerObjectUrl = null;
 
+  async function fetchVideoBlob(videoPath) {
+    // ngrok's free tunnel is reliable for small range responses but can close
+    // a larger MP4 response early. Assemble bounded responses into one Blob.
+    const blockSize = 64 * 1024;
+    const chunks = [];
+    let offset = 0;
+    let total = null;
+    while (total === null || offset < total) {
+      const end = total === null ? offset + blockSize - 1 : Math.min(offset + blockSize - 1, total - 1);
+      const response = await backendFetch(videoPath, {
+        headers: { Range: "bytes=" + offset + "-" + end },
+      });
+      const type = response.headers.get("content-type") || "";
+      const range = response.headers.get("content-range") || "";
+      const match = /^bytes \d+-\d+\/(\d+)$/.exec(range);
+      if (!response.ok || !type.startsWith("video/") || !match) {
+        throw new Error("the server returned " + (type || "an invalid response") + " instead of the video");
+      }
+      total = Number(match[1]);
+      const chunk = await response.blob();
+      if (!chunk.size) throw new Error("the video download ended unexpectedly");
+      chunks.push(chunk);
+      offset += chunk.size;
+      barLabel.textContent = "Loading described video… " + Math.min(100, Math.round(offset * 100 / total)) + "%";
+    }
+    return new Blob(chunks, { type: "video/mp4" });
+  }
+
   function loadCompletedVideo(videoPath) {
     const videoUrl = apiUrl(videoPath);
     if (player.dataset.source === videoUrl) return;
@@ -490,13 +518,7 @@
     if (BACKEND_URL) {
       player.removeAttribute("src");
       player.load();
-      backendFetch(videoPath).then((response) => {
-        const type = response.headers.get("content-type") || "";
-        if (!response.ok || !type.startsWith("video/")) {
-          throw new Error("the server returned " + (type || "an invalid response") + " instead of the video");
-        }
-        return response.blob();
-      }).then((blob) => {
+      fetchVideoBlob(videoPath).then((blob) => {
         if (player.dataset.source !== videoUrl) return;
         if (playerObjectUrl) URL.revokeObjectURL(playerObjectUrl);
         playerObjectUrl = URL.createObjectURL(blob);
