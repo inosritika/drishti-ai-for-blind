@@ -310,7 +310,7 @@
             <label class="file-label" for="clip">Choose a video file</label>
             <input type="file" id="clip" name="clip" accept="video/*">
             <p class="picked" id="picked" aria-live="polite"></p>
-            <p class="hint"><kbd>U</kbd>jumps here. Up to 30 seconds for now.</p>
+            <p class="hint"><kbd>U</kbd>jumps here. Up to 162 seconds (120 MB max).</p>
           </div>
         </li>
 
@@ -486,6 +486,10 @@
     if (state.video && player.getAttribute("src") !== state.video) {
       player.src = state.video;
       player.hidden = false;
+      // Setting src alone left Chrome's media element in NETWORK_EMPTY on the
+      // completed-job view. Start the load explicitly so metadata, duration,
+      // and native controls become available as soon as output.mp4 exists.
+      player.load();
     }
 
     // Facts: the numbers that show this was measured, not guessed.
@@ -704,11 +708,10 @@
   // Keyboard shortcuts. Never steal keys from a control the user is operating.
   const HELP =
     "Drishti turns a short video into an audio-described video. " +
-    "Press U to choose a video file, up to 30 seconds. " +
+    "Three steps. Press U to choose a video file, up to 162 seconds. " +
     "Press L to choose the narration language from a list, or press V and " +
-    "simply say it. Press W to name the characters, so descriptions use " +
-    "their names. " +
-    "simply say it — in any language. The default matches the video's own " +
+    "simply say it — in any language. Press W to name the characters, so " +
+    "descriptions use their names. The default matches the video's own " +
     "language automatically. Press D to start describing. " +
     "Press question mark to hear this again.";
 

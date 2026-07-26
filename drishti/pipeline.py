@@ -272,6 +272,13 @@ def run(job: Path, cfg: dict, profile: Profile, force: set[str] | None = None) -
                 f"To keep moving, copy a known-good {' or '.join(stage.outputs) or 'output'} "
                 f"into {job}/ and rerun; the runner will skip the stage."
             ) from None
+        except SystemExit as exc:
+            # Stages use SystemExit for expected input/configuration failures.
+            # It is not an Exception, so record it before the web subprocess
+            # exits; otherwise the UI keeps polling with no error to show.
+            detail = str(exc).strip() or f"stage exited with code {exc.code}"
+            status.set(error=f"{stage.name}: {detail}", stage=stage.name)
+            raise
         except Exception as exc:  # noqa: BLE001 - surface any stage failure cleanly
             status.set(error=f"{stage.name}: {exc}", stage=stage.name)
             raise
