@@ -119,7 +119,7 @@ def hear(wav_bytes: bytes) -> dict:
     return {"language": language, "transcript": transcript, "heard": how}
 
 
-def start_job(video: bytes, filename: str, language: str) -> str:
+def start_job(video: bytes, filename: str, language: str, cast: str = "") -> str:
     """Create a job directory, then run the pipeline on it in the background."""
     profile = get_profile("dev")
     suffix = Path(filename).suffix.lower() or ".mp4"
@@ -138,6 +138,8 @@ def start_job(video: bytes, filename: str, language: str) -> str:
                "--profile", profile.name]
     if language and language != "auto":
         command += ["--language", language]
+    if cast.strip():
+        command += ["--cast", cast.strip()]
 
     def run() -> None:
         child = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE,
@@ -172,6 +174,7 @@ def job_state(job_id: str) -> dict | None:
         "gaps": read_json(job / "gaps.json", default=[]) or [],
         "segments": read_json(job / "segments.json", default=[]) or [],
         "narration": read_json(job / "narration.json", default=[]) or [],
+        "cast": read_json(job / "cast.json", default={}) or {},
         "video": f"/jobs/{job_id}/output.mp4" if (job / "output.mp4").is_file() else None,
         "log": LOGS.get(job_id, [])[-14:],
     }
@@ -242,6 +245,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.rfile.read(length),
                     query.get("name", ["clip.mp4"])[0],
                     query.get("language", ["auto"])[0],
+                    query.get("cast", [""])[0],
                 )
                 self._send_json(200, {"job": job_id})
             except Exception as exc:

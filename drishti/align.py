@@ -58,6 +58,7 @@ was chosen, which is far more convincing than a bare timestamp.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -269,6 +270,14 @@ def plan(job: Path, cfg: dict) -> None:
     gaps = read_json(job / "gaps.json", default=[])
     scenes = read_json(job / "scenes.json", default={})
     beats = scenes.get("beats", []) if isinstance(scenes, dict) else []
+
+    # Character names, if the `cast` stage bound any. Applied here rather than
+    # in cast.py so this stage stays the single place beats are transformed,
+    # and so the substitution itself is pure and unit-testable.
+    cast = read_json(job / "cast.json", default={})
+    bindings = cast.get("bindings", {}) if isinstance(cast, dict) else {}
+    if bindings:
+        beats = apply_cast(beats, bindings)
 
     if not gaps:
         raise SystemExit(

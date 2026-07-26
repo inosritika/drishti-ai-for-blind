@@ -19,4 +19,4 @@ __version__ = "0.1.0"
 # Fixed stage order. `transcript` is deliberately NOT a stage: in Saaras chunk
 # mode the transcript falls out of gap detection, so gaps.py writes it from
 # calls we already paid for. Never add a second STT pass.
-STAGE_ORDER = ["validate", "gaps", "scenes", "align", "narrate", "tts_fit", "mix"]
+STAGE_ORDER = ["validate", "gaps", "scenes", "cast", "align", "narrate", "tts_fit", "mix"]

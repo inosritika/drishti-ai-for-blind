@@ -65,12 +65,22 @@ from typing import Any
 
 from .common import OPENAI_URL, env_key, http_json, log, read_json, write_json
 
-# Frames are cheap; one is enough to bind, and keeps the stage under a second
-# of network time. Taken from the middle of the clip, where the principal
-# character is most likely on screen.
 FRAME_WIDTH = 640
+# Several frames in ONE call, not one frame. A single frame taken from the
+# middle of the clip failed on the very first real run: at that instant Mr Bean
+# was a pair of hands in close-up, so the model correctly answered UNKNOWN. The
+# refusal was right and the evidence was bad. Spreading a few frames across the
+# beats that actually mention people fixes the evidence without weakening the
+# refusal, and costs one request either way.
+MAX_FRAMES = 3
 # A name must map to a descriptor from this list or to nothing at all.
 REFUSAL = "UNKNOWN"
+# Beats naming one of these are where a character is likely to be on screen.
+PERSON_WORDS = (
+    "man", "men", "woman", "women", "boy", "girl", "child", "children",
+    "person", "people", "figure", "lady", "gentleman", "passenger", "passengers",
+    "guest", "guests", "crowd", "waiter", "driver", "officer",
+)
 
 
 def parse_names(raw: str | list[str] | None) -> list[str]:
@@ -134,17 +144,45 @@ def descriptor_key(candidate: str) -> str:
     return candidate.split(":", 1)[0].strip()
 
 
-def _grab_frame(video: Path, at_seconds: float) -> bytes:
+def frame_times(scenes: dict[str, Any], duration: float) -> list[float]:
+    """When to look, preferring moments a beat says a person is on screen.
+
+    Spread across the clip rather than clustered, so a character who only
+    appears late still gets seen. Falls back to even spacing when no beat
+    mentions anyone.
+    """
+    peopled = [
+        (float(beat["start"]) + float(beat["end"])) / 2
+        for beat in scenes.get("beats", []) or []
+        if any(
+            word in str(entity).lower()
+            for entity in (beat.get("entities") or [])
+            for word in PERSON_WORDS
+        )
+    ]
+    if not peopled:
+        span = duration or 1.0
+        return [span * fraction for fraction in (0.25, 0.5, 0.75)][:MAX_FRAMES]
+    if len(peopled) <= MAX_FRAMES:
+        return peopled
+    step = (len(peopled) - 1) / (MAX_FRAMES - 1)
+    return [peopled[round(index * step)] for index in range(MAX_FRAMES)]
+
+
+def _grab_frame(video: Path, at_seconds: float) -> bytes | None:
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
         frame = Path(handle.name)
     try:
         subprocess.run(
             ["ffmpeg", "-hide_banner", "-v", "error", "-y",
-             "-ss", f"{at_seconds:.2f}", "-i", str(video),
+             "-ss", f"{max(0.0, at_seconds):.2f}", "-i", str(video),
              "-frames:v", "1", "-vf", f"scale={FRAME_WIDTH}:-1", str(frame)],
             check=True,
         )
-        return frame.read_bytes()
+        data = frame.read_bytes()
+        return data or None
+    except subprocess.CalledProcessError:
+        return None
     finally:
         frame.unlink(missing_ok=True)
 
@@ -152,15 +190,16 @@ def _grab_frame(video: Path, at_seconds: float) -> bytes:
 def _prompt(names: list[str], candidates: list[str]) -> str:
     return (
         "Someone has typed the character names below. They may be WRONG — these "
-        "characters may not appear in this clip at all. Verify against the frame.\n"
+        "characters may not appear in this clip at all. Verify against the frames, "
+        "which are stills taken at different moments of one short clip.\n"
         + "\n".join(f"  - {name}" for name in names)
         + "\n\nA separate system described the people and objects visible, using "
         "only what it could see:\n"
         + "\n".join(f"  - {candidate}" for candidate in candidates)
         + "\n\nFor each name: if you RECOGNISE that specific fictional character in "
-        "this frame, reply `Name => descriptor`, copying the descriptor text "
+        "ANY of the frames, reply `Name => descriptor`, copying the descriptor text "
         f"EXACTLY as written above. If you do not recognise the character, or the "
-        f"frame simply shows someone who is not that character, reply "
+        f"frames simply show someone who is not that character, reply "
         f"`Name => {REFUSAL}`.\n\n"
         "A wrong match is far worse than no match — a blind listener cannot catch "
         f"the error. When in any doubt, answer {REFUSAL}. Never invent a "
@@ -169,15 +208,16 @@ def _prompt(names: list[str], candidates: list[str]) -> str:
     )
 
 
-def _ask(frame: bytes, names: list[str], candidates: list[str]) -> str:
-    payload = {
-        "model": "gpt-5.6",
-        "input": [{"role": "user", "content": [
-            {"type": "input_text", "text": _prompt(names, candidates)},
-            {"type": "input_image",
-             "image_url": "data:image/jpeg;base64," + base64.b64encode(frame).decode()},
-        ]}],
-    }
+def _ask(frames: list[bytes], names: list[str], candidates: list[str]) -> str:
+    content: list[dict[str, str]] = [
+        {"type": "input_text", "text": _prompt(names, candidates)}
+    ]
+    for frame in frames:
+        content.append({
+            "type": "input_image",
+            "image_url": "data:image/jpeg;base64," + base64.b64encode(frame).decode(),
+        })
+    payload = {"model": "gpt-5.6", "input": [{"role": "user", "content": content}]}
     response = http_json(
         OPENAI_URL, payload,
         {"Authorization": f"Bearer {env_key('OPENAI_API_KEY')}"},
@@ -216,6 +256,46 @@ def parse_reply(reply: str, names: list[str], candidates: list[str]) -> dict[str
     return bindings
 
 
+def expand_generic(
+    bindings: dict[str, str], candidates: list[str]
+) -> dict[str, str]:
+    """Also bind the bare head noun when it can only mean one person.
+
+    Ritika's beats drift: the same person is "suited man" in one beat and just
+    "man" in the next. Binding only the specific descriptor names the character
+    in one line out of four. So if we bound "suited man" and the bare word
+    "man" is also used, extend the binding to it.
+
+    Only when it is unambiguous. "bowler-hatted man" is bound in the Chaplin
+    clip, but "bearded man" is standing right there — a bare "man" could be
+    either, so it stays unbound and keeps its description. One rule, checked
+    against both clips.
+    """
+    keys = [descriptor_key(candidate) for candidate in candidates]
+    extra: dict[str, str] = {}
+
+    for descriptor, name in bindings.items():
+        head = descriptor.rsplit(" ", 1)[-1].lower()
+        if head == descriptor.lower():
+            continue  # already the bare noun
+        if head not in {key.lower() for key in keys}:
+            continue  # nobody ever says it bare
+        # Any OTHER descriptor sharing the head noun makes a bare mention
+        # ambiguous — including one that is itself bound to a different name.
+        rivals = [
+            key for key in keys
+            if key.lower() != head
+            and key.lower() != descriptor.lower()
+            and key.rsplit(" ", 1)[-1].lower() == head
+        ]
+        if rivals:
+            continue  # another "<something> man" could be meant
+        match = next(key for key in keys if key.lower() == head)
+        extra.setdefault(match, name)
+
+    return {**bindings, **extra}
+
+
 def bind(job: Path, cfg: dict) -> None:
     """Write cast.json into `job`."""
     names = parse_names(cfg.get("cast"))
@@ -240,9 +320,18 @@ def bind(job: Path, cfg: dict) -> None:
         return
 
     duration = float((read_json(job / "meta.json", default={}) or {}).get("duration") or 0.0)
-    reply = _ask(_grab_frame(video, duration / 2 if duration else 1.0), names, candidates)
+    times = frame_times(scenes if isinstance(scenes, dict) else {}, duration)
+    frames = [frame for frame in (_grab_frame(video, at) for at in times) if frame]
+    if not frames:
+        write_json(job / "cast.json", result)
+        log("  cast: could not read a frame to look at — skipping")
+        return
 
-    bindings = parse_reply(reply, names, candidates)
+    log(f"  cast: checking {len(names)} name(s) against {len(frames)} frame(s) "
+        f"at {', '.join(f'{t:.1f}s' for t in times[:len(frames)])}")
+    reply = _ask(frames, names, candidates)
+
+    bindings = expand_generic(parse_reply(reply, names, candidates), candidates)
     result["bindings"] = bindings
     result["unmatched"] = [n for n in names if n not in bindings.values()]
     write_json(job / "cast.json", result)
