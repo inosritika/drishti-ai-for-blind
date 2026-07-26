@@ -63,7 +63,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import log, read_json, write_json
-from .config import char_budget
+from .config import normalize_tone, tone_char_budget
 
 # A narration must leave a little air before dialogue resumes.
 TAIL_PADDING = 0.25
@@ -93,7 +93,99 @@ def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> floa
     return max(0.0, min(a_end, b_end) - max(a_start, b_start))
 
 
-def apply_cast(beats: list[dict[str, Any]], bindings: dict[str, str]) -> list[dict[str, Any]]:
+# People-words used to find the head noun of an entity description, so
+# "Dark-haired adult man in a brown suit" tells us the sentence will call this
+# person some kind of "man".
+_HEAD_NOUNS = (
+    "man", "woman", "boy", "girl", "child", "person", "figure", "lady",
+    "gentleman", "waiter", "driver", "officer", "passenger",
+)
+
+
+def _head_noun(description: str) -> str | None:
+    """The word a sentence will most likely use for this person."""
+    words = re.findall(r"[a-z]+", description.lower())
+    return next((word for word in words if word in _HEAD_NOUNS), None)
+
+
+def phrase_patterns(
+    bindings: dict[str, str], entity_details: dict[str, str]
+) -> list[tuple[re.Pattern[str], str]]:
+    """Patterns matching how the EVENT TEXT refers to each bound person.
+
+    scenes.py writes IDs into `entities` but deliberately keeps them out of the
+    prose: the beat says "The suited man grimaces", never "man1 grimaces". So
+    substituting the ID alone renames the entity list and leaves the sentence
+    saying "the suited man" — exactly the thing we set out to fix.
+
+    We bridge it with the head noun of the entity's own description. "man1:
+    Dark-haired adult man in a brown suit" gives "man", so "the man", "a suited
+    man" and "the dark-haired man" all become the name.
+
+    Only when unambiguous. Two people whose descriptions are both some kind of
+    "man" means a bare "the man" could be either, so neither is rewritten in
+    prose and both keep their descriptions. entity_details makes that check
+    exact — it lists people and nothing else.
+    """
+    heads: dict[str, list[str]] = {}
+    words: dict[str, set[str]] = {}
+    for entity_id, description in entity_details.items():
+        head = _head_noun(str(description))
+        if head:
+            heads.setdefault(head, []).append(entity_id)
+        words[entity_id] = set(re.findall(r"[a-z]{3,}", str(description).lower()))
+
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for entity_id, name in bindings.items():
+        description = entity_details.get(entity_id)
+        if not description:
+            continue
+        head = _head_noun(str(description))
+        if not head:
+            continue
+        sharing = heads.get(head, [])
+
+        if len(sharing) == 1:
+            # Nobody else is a "man": any "the … man" is this person.
+            patterns.append((
+                re.compile(r"\b(?:a|an|the)\s+(?:[\w-]+\s+){0,3}?" + head + r"\b",
+                           re.IGNORECASE),
+                name,
+            ))
+            continue
+
+        # Two men in frame. A bare "the man" really is ambiguous and stays put,
+        # but the prose rarely leaves it bare — it says "the bowler-hatted man"
+        # to tell them apart, and "bowler" appears in this entity's description
+        # and no one else's. Match only on those distinguishing words.
+        others: set[str] = set()
+        for other_id in sharing:
+            if other_id != entity_id:
+                others |= words.get(other_id, set())
+        distinctive = sorted(
+            word for word in words.get(entity_id, set())
+            if word not in others and word != head and len(word) > 3
+        )
+        if not distinctive:
+            continue
+        alternatives = "|".join(re.escape(word) for word in distinctive)
+        # "the bowler-hatted man", "a mustached man", "the man with the cane"
+        patterns.append((
+            re.compile(
+                r"\b(?:a|an|the)\s+(?:[\w-]*\s+)?(?:" + alternatives + r")[\w-]*\s+"
+                r"(?:[\w-]+\s+)?" + head + r"\b",
+                re.IGNORECASE,
+            ),
+            name,
+        ))
+    return patterns
+
+
+def apply_cast(
+    beats: list[dict[str, Any]],
+    bindings: dict[str, str],
+    entity_details: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     """Replace bound descriptors with character names, in text and entities.
 
     Pure and reversible: the original wording is kept on the beat as
@@ -117,10 +209,15 @@ def apply_cast(beats: list[dict[str, Any]], bindings: dict[str, str]) -> list[di
         for descriptor, name in ordered
     ]
 
+    # How the prose refers to these people, when scenes.py gave us a registry.
+    prose = phrase_patterns(bindings, entity_details or {})
+
     def rename(text: str) -> str:
         for with_article, bare, name in patterns:
             text = with_article.sub(name, text)
             text = bare.sub(name, text)
+        for pattern, name in prose:
+            text = pattern.sub(name, text)
         return text
 
     renamed: list[dict[str, Any]] = []
@@ -171,6 +268,8 @@ def select(
     beats: list[dict[str, Any]],
     *,
     language: str | None = None,
+    cast: dict[str, str] | None = None,
+    tone: str | None = None,
     max_segments: int = 4,
     min_confidence: float = MIN_CONFIDENCE,
     lookback: float = LOOKBACK,
@@ -242,8 +341,18 @@ def select(
             "start": float(gap["start"]),
             "end": float(gap["end"]),
             "max_duration": max_duration,
-            "char_budget": char_budget(max_duration, language),
+            # Budgeted at the pace this tone will actually be spoken at. A
+            # slower tone fits fewer characters in the same window, and sizing
+            # at the base pace would push exactly those lines into the fit
+            # loop's shorten-or-skip path.
+            "char_budget": tone_char_budget(max_duration, language, tone),
             "language": language,
+            "tone": normalize_tone(tone),
+            # {name: visual description} for characters a human named. narrate
+            # renders this so the MODEL can link a name to however the prose
+            # happens to phrase it — the general case that string substitution
+            # cannot cover ("the man in the bowler hat", or any other language).
+            "cast": dict(cast or {}),
             "beats": [dict(beat, when=when) for _, when, beat in owned],
             "score": round(room * best, 3),
             "reason": (
@@ -276,8 +385,9 @@ def plan(job: Path, cfg: dict) -> None:
     # and so the substitution itself is pure and unit-testable.
     cast = read_json(job / "cast.json", default={})
     bindings = cast.get("bindings", {}) if isinstance(cast, dict) else {}
+    details = scenes.get("entity_details", {}) if isinstance(scenes, dict) else {}
     if bindings:
-        beats = apply_cast(beats, bindings)
+        beats = apply_cast(beats, bindings, details if isinstance(details, dict) else {})
 
     if not gaps:
         raise SystemExit(
@@ -291,10 +401,18 @@ def plan(job: Path, cfg: dict) -> None:
             "fallback from demo/scene_fallbacks/ into the job directory."
         )
 
+    named = {
+        name: str(details.get(entity_id) or "")
+        for entity_id, name in bindings.items()
+        if isinstance(details, dict) and details.get(entity_id)
+    }
+
     segments = select(
         gaps,
         beats,
         language=cfg.get("output_language"),
+        cast=named,
+        tone=scenes.get("tone") if isinstance(scenes, dict) else None,
         max_segments=int(cfg.get("max_segments", 4)),
         min_confidence=float(cfg.get("min_confidence", MIN_CONFIDENCE)),
         lookback=float(cfg.get("lookback", LOOKBACK)),

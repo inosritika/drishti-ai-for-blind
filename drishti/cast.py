@@ -105,13 +105,16 @@ def parse_names(raw: str | list[str] | None) -> list[str]:
 def candidate_descriptors(scenes: dict[str, Any]) -> list[str]:
     """Every distinct way Ritika's beats refer to something visible.
 
-    Prefers a top-level `entities` registry when scenes.py provides one, since
-    that carries descriptions and is free of the label drift we see per-beat
-    (the same person appearing as "man" in one beat and "suited man" in the
-    next). Falls back to collecting per-beat entity labels, so this stage never
-    blocks on a scenes.py schema change.
+    Prefers scenes.py's `entity_details` registry — `{"man1": "Dark-haired
+    adult man in a brown suit and red tie"}` — which is strictly better input
+    than the per-beat labels: it lists PEOPLE only rather than every mug and
+    kettle, it carries a real description, and its IDs are stable, so the
+    "man" / "suited man" drift that used to need patching over is gone.
+
+    Falls back to per-beat labels when the registry is absent, so this stage
+    keeps working against older jobs and never blocks on a schema change.
     """
-    registry = scenes.get("entities")
+    registry = scenes.get("entity_details") or scenes.get("entities")
     if isinstance(registry, dict) and registry:
         return [
             f"{key}: {value}" if isinstance(value, str) and value.strip() else str(key)

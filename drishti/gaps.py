@@ -115,6 +115,23 @@ RATE_LIMIT_BACKOFF = 5.0
 # Transcribed junk that means "I heard music", not "I heard speech".
 _JUNK = {"", "-", "--", "...", "…", "♪", "♪♪", "[music]", "(music)", "[music]."}
 
+# A chunk needs this many words before it counts as speech. Set to 1 to keep
+# every single-word transcript (the behaviour before this was measured).
+#
+# Measured over five clips: of 139 speech chunks, the 34 one-word ones are where
+# essentially all of the hallucination lives — `Hello` appeared 11 times and
+# `Okay` 12, always over music or percussion, never with a second word attached.
+# The 93 three-plus-word chunks contained no false positives at all. On the Bean
+# clip, which has no dialogue whatsoever, dropping one-word chunks turns 2 wrong
+# gaps into the 1 correct gap spanning the whole clip.
+#
+# The cost is real and known: single-word dialogue exists ("Cindy?", "Right?",
+# "What?"), and this throws it away too. That is survivable because a lone
+# dropped chunk is put back by bridge_isolated_silence when both neighbours are
+# speech, and because 1.5s is under min_gap, so one dropped chunk on its own can
+# never open a gap.
+DEFAULT_MIN_WORDS = 2
+
 
 # --------------------------------------------------------------------------
 # cfg -> env -> default
@@ -167,6 +184,34 @@ def is_speech(transcript: str) -> bool:
         if unicodedata.category(char)[0] in ("L", "M", "N")
     ]
     return len(letters) >= 1
+
+
+def word_count(transcript: str) -> int:
+    """Words in a transcript, counting any script.
+
+    Splitting on whitespace is enough for every language Saaras returns — the
+    point is only to tell a bare "Okay" apart from a phrase.
+    """
+    return len([word for word in (transcript or "").split() if word])
+
+
+def drop_short_chunks(chunks: list[dict], min_words: int) -> int:
+    """Un-flag speech chunks whose transcript is too short to trust.
+
+    Runs BEFORE bridge_isolated_silence on purpose. A one-word chunk sitting
+    between two real speech chunks gets dropped here and then put straight back
+    by bridging, so genuine one-word dialogue inside a conversation survives —
+    only one-word chunks surrounded by silence, which is what hallucination over
+    music looks like, actually stay dropped.
+    """
+    if min_words <= 1:
+        return 0
+    dropped = 0
+    for chunk in chunks:
+        if chunk["has_speech"] and word_count(chunk["transcript"]) < min_words:
+            chunk["has_speech"] = False
+            dropped += 1
+    return dropped
 
 
 # --------------------------------------------------------------------------
@@ -476,7 +521,8 @@ def detect(job: Path, cfg: dict) -> None:
                    chunk_seconds (default 1.5), min_gap (default 1.6),
                    edge_padding (default 0.15), noise_db (default -32.0),
                    min_chunk (default 0.5), concurrency (default 4),
-                   bridge_silence (bool, default True)
+                   bridge_silence (bool, default True),
+                   min_words (default 2)
     """
     job = Path(job)
     wav_path = job / "audio.wav"
@@ -498,9 +544,10 @@ def detect(job: Path, cfg: dict) -> None:
     bridge = str(_setting(cfg, "bridge_silence", "DRISHTI_BRIDGE_SILENCE", "1")).lower() not in (
         "0", "false", "no", "off",
     )
+    min_words = _int_setting(cfg, "min_words", "DRISHTI_MIN_WORDS", DEFAULT_MIN_WORDS)
 
     log(f"  gaps: detector={detector} chunk={chunk_seconds}s pad={edge_padding}s "
-        f"min_gap={min_gap}s concurrency={concurrency}")
+        f"min_gap={min_gap}s concurrency={concurrency} min_words={min_words}")
 
     if detector == "silence":
         # No STT, so there is no language evidence to report. Saying "unknown"
@@ -514,6 +561,11 @@ def detect(job: Path, cfg: dict) -> None:
         raw_chunks = split_chunks(wav_path, chunk_seconds, min_chunk)
         log(f"  {len(raw_chunks)} chunks -> Saaras")
         chunks = transcribe_all(raw_chunks, concurrency)
+
+        dropped = drop_short_chunks(chunks, min_words)
+        if dropped:
+            log(f"  dropped {dropped} chunk(s) under {min_words} word(s) — "
+                f"hallucination over music looks exactly like this")
 
         if bridge:
             flipped = bridge_isolated_silence(chunks)
@@ -550,6 +602,10 @@ if __name__ == "__main__":
     parser.add_argument("--noise-db", type=float, help=f"silence mode only, default {DEFAULT_NOISE_DB}")
     parser.add_argument("--concurrency", type=int, help=f"parallel Saaras calls, default {DEFAULT_CONCURRENCY}")
     parser.add_argument("--no-bridge", action="store_true", help="do not bridge isolated silent chunks")
+    parser.add_argument("--min-words", type=int,
+                        help=f"words needed to count as speech, default {DEFAULT_MIN_WORDS}")
+    parser.add_argument("--keep-single-words", action="store_true",
+                        help="trust one-word transcripts (turns the hallucination filter off)")
     args = parser.parse_args()
 
     detect(
@@ -562,5 +618,6 @@ if __name__ == "__main__":
             "noise_db": args.noise_db,
             "concurrency": args.concurrency,
             "bridge_silence": False if args.no_bridge else None,
+            "min_words": 1 if args.keep_single_words else args.min_words,
         },
     )

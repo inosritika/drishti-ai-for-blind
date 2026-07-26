@@ -25,7 +25,7 @@ sarvam_chat_text):
   - ONE narration request per segment. This is an invariant: asking for
     narration per visual beat produced five overlapping lines all starting at
     the same timestamp.
-  - model sarvam-30b, temperature 0.1, reasoning_effort=None
+  - model sarvam-105b, temperature 0.1, reasoning_effort=None
     (null returns content; "low" spends the token budget reasoning instead)
   - PLAIN TEXT output, not JSON. Structured output truncated twice on the real
     clip with "Unterminated string". Strip markdown fences and quotes.
@@ -34,14 +34,24 @@ sarvam_chat_text):
   - pass cache_ns="sarvam_chat"
 
 BUDGET IN CHARACTERS, NOT SECONDS
-  segment["char_budget"] is the length to ask for and to check. Do NOT ask the
-  model for "at most N seconds" — that exact instruction returned a line which
-  rendered in 6.23s against a 4s window, because seconds mean nothing to it.
-  Characters it can count. The budget is already computed from max_duration,
-  the output language's measured speech rate and a safety margin, so a line
-  inside budget should fit on the first synthesis. If the model overshoots,
-  ask again with the actual character count, then truncate at a sentence
-  boundary. max_duration stays in narration.json for tts_fit to verify against.
+  segment["char_budget"] is the length to aim for and to steer the prompt with.
+  Do NOT ask the model for "at most N seconds" — that exact instruction returned
+  a line which rendered in 6.23s against a 4s window, because seconds mean
+  nothing to it. Characters it can count. The budget is computed from
+  max_duration, the output language's measured speech rate and a safety margin,
+  so a line inside budget should fit on the first synthesis.
+
+  If the model overshoots the budget, ask ONCE more with the actual character
+  count in the retry prompt. If it still overshoots, accept the complete
+  sentence and pass it through — tts_fit's re-pace / shorten / skip loop will
+  adapt duration. Never truncate mid-sentence here; a broken utterance is worse
+  than a slightly-fast delivery. max_duration stays in narration.json for
+  tts_fit to verify and adapt against.
+
+  Coverage scales with budget: under 60 chars the whitelist asks for one beat;
+  under 100, two; otherwise three. A 49-char window cannot hold three beats
+  without collapsing grammar — asking for what actually fits is the whole
+  point of the char budget in the first place.
 
 WHAT TO SAY WITH THE BEATS YOU ARE GIVEN
   A segment carries EVERY beat that overlaps its window, which is usually more
@@ -96,10 +106,10 @@ from .common import (
     script_ok,
     write_json,
 )
-from .config import SUPPORTED_TTS
+from .config import SUPPORTED_TTS, tone_register
 
 CHAT_URL = f"{SARVAM_BASE_URL}/v1/chat/completions"
-CHAT_MODEL = "sarvam-30b"
+CHAT_MODEL = "sarvam-105b"
 CACHE_NS = "sarvam_chat"
 
 # Explicit human name + script per code. The model needs the script spelled out
@@ -117,11 +127,6 @@ LANGUAGE_PROMPT_NAME: dict[str, str] = {
     "ta-IN": "Tamil written in Tamil script",
     "te-IN": "Telugu written in Telugu script",
 }
-
-# Sentence terminators across the scripts we support. Used when the model
-# overshoots the budget and we need to cut at the nearest complete sentence
-# rather than mid-word.
-_SENTENCE_ENDERS = tuple(".!?।॥？！")
 
 # Strips ```lang ... ``` fences the model sometimes wraps a plain sentence in.
 _FENCE_RE = re.compile(r"^```[a-zA-Z0-9]*\n?|\n?```$")
@@ -168,24 +173,6 @@ def _sarvam_chat(system: str, user: str) -> str:
     return _clean(content)
 
 
-def _truncate_at_sentence(text: str, limit: int) -> str:
-    """Longest prefix of `text` under `limit` that ends on a sentence boundary.
-
-    Last-resort recovery only. If nothing under the limit ends cleanly, cut at
-    the last whitespace before the limit rather than mid-word.
-    """
-    if len(text) <= limit:
-        return text
-    window = text[:limit]
-    best = max(window.rfind(ender) for ender in _SENTENCE_ENDERS)
-    if best >= 0:
-        return window[: best + 1].strip()
-    space = window.rfind(" ")
-    if space > 0:
-        return window[:space].strip()
-    return window.strip()
-
-
 def _system_prompt(language: str) -> str:
     lang_name = LANGUAGE_PROMPT_NAME[language]
     return (
@@ -207,6 +194,9 @@ def _system_prompt(language: str) -> str:
         "  2. Who is present, and whether that changed.\n"
         "  3. What someone physically did.\n"
         "  4. Ambient continuation — drop this first when short of room.\n\n"
+        "The beats you receive are in chronological order. Your one sentence should\n"
+        "trace the arc from the first `during` or `before` beat to the last —\n"
+        "leaving out a middle beat leaves the listener disoriented.\n\n"
         "Merge related beats into clauses rather than spending a sentence each.\n"
         "Never mention the camera or the shot. Never invent detail to fill\n"
         "uncertainty — if `uncertain_details` flags something, avoid it or hedge.\n"
@@ -233,6 +223,47 @@ def _format_beat(beat: dict) -> str:
     )
 
 
+_NAME_IN_SCRIPT: dict[tuple[str, str], str] = {}
+
+
+def localize_name(name: str, language: str) -> str:
+    """The character's name written in the output language's own script.
+
+    Handing the model an English name inside a Hindi prompt drags the whole
+    line into Latin: first it answered "Mr Bean grimaced and" (plain English),
+    then "Mr Bean ka haath mug ko side" (romanised Hindi). Both were correctly
+    rejected by the script check, and no amount of restating the language in
+    the note fixed it — the Latin name in front of it was the stronger signal.
+
+    So we transliterate once per (name, language) and put the result in the
+    note, leaving nothing Latin to copy. This is also simply right: a
+    Devanagari listener should hear मिस्टर बीन, not an English word dropped
+    into a Hindi sentence.
+
+    Falls back to the original name if the model returns something in the
+    wrong script — a Latin name is a blemish, a failed stage is a broken demo.
+    """
+    if script_ok(name, language):
+        return name  # already in the right script (or the language is Latin)
+    key = (name, language)
+    if key in _NAME_IN_SCRIPT:
+        return _NAME_IN_SCRIPT[key]
+
+    lang_name = LANGUAGE_PROMPT_NAME.get(language, language)
+    try:
+        written = _sarvam_chat(
+            f"You transliterate names into {lang_name}. Reply with the "
+            f"transliterated name only — no explanation, no quotes.",
+            f"Write this character name in {lang_name}: {name}",
+        )
+    except Exception:  # noqa: BLE001 — never fail the stage over a name
+        written = ""
+    if not written or not script_ok(written, language):
+        written = name
+    _NAME_IN_SCRIPT[key] = written
+    return written
+
+
 def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
     beats = segment.get("beats", [])
     beats_block = "\n".join(_format_beat(beat) for beat in beats)
@@ -243,14 +274,36 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
     coverable = [b for b in beats if b.get("when") in ("during", "before")]
     floor = max(1, int(char_budget * 0.6))
 
-    if len(coverable) >= 2:
-        coverage_min = min(len(coverable), 3)
+    # Coverage scales with budget: a 49-char window cannot hold three beats
+    # without collapsing grammar. Ask for what actually fits.
+    if char_budget < 60:
+        max_covered = 1
+    elif char_budget < 100:
+        max_covered = 2
+    else:
+        max_covered = 3
+    target_count = min(len(coverable), max_covered)
+
+    if target_count >= 2:
+        required = coverable[:target_count]
+        checklist = "\n".join(
+            f"  {i + 1}. {(beat.get('event') or '').strip()}"
+            for i, beat in enumerate(required)
+        )
         coverage_note = (
-            f"There are {len(coverable)} beats marked `during` or `before`. "
-            f"Cover at least {coverage_min} of them in one sentence — merge related "
-            "beats into clauses rather than picking one and ignoring the rest. "
-            "`after` beats are look-ahead: mention them briefly or drop them, "
-            "never narrate the outcome."
+            f"Your one sentence MUST reference all of the following, in this order:\n"
+            f"{checklist}\n\n"
+            "Merge related items into clauses; do not spend a sentence each. Do not "
+            "invent detail beyond these items. `after` beats are look-ahead: mention "
+            "them briefly or drop them, never narrate the outcome."
+        )
+    elif target_count == 1:
+        beat_event = (coverable[0].get("event") or "").strip()
+        coverage_note = (
+            f"Your one sentence should describe this beat: {beat_event}\n\n"
+            "Keep it a natural, complete sentence. Do not force in the other beats; "
+            "the budget is too tight for more than one clean clause. `after` beats "
+            "are look-ahead: drop them entirely."
         )
     else:
         coverage_note = (
@@ -258,7 +311,42 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
             "surrounding beats without padding."
         )
 
+    # Characters a human named, as {name: visual description}. align has
+    # already substituted the name wherever it could match the wording
+    # mechanically; this covers the rest — "the man in the bowler hat", a
+    # phrasing no pattern anticipated, or prose in another language. The model
+    # links description to phrasing, which is the part it is actually good at.
+    cast = segment.get("cast") or {}
+    cast_note = ""
+    if cast:
+        language = segment.get("language") or "en-IN"
+        rows = "\n".join(f"  - {localize_name(name, language)}: {description}"
+                         for name, description in cast.items())
+        # The names and descriptions here are English, and saying so in English
+        # is enough to pull the whole line into English: asked for Hindi with a
+        # cast note attached, the model returned "Mr Bean grimaced and" and the
+        # script check rejected it. Restate the output language inside the note
+        # and require the name in that script — which is also correct practice,
+        # since a Devanagari listener should hear मिस्टर बीन, not a Latin word.
+        lang_name = LANGUAGE_PROMPT_NAME[segment.get("language") or "en-IN"]
+        cast_note = (
+            "\n\nA viewer told us who is in this clip:\n" + rows + "\n"
+            "When a beat refers to one of these people, use the NAME rather "
+            "than describing them again. Anyone NOT listed keeps their "
+            "description — never invent or guess a name for them.\n"
+            f"These names are written in English for your reference only. Your "
+            f"reply must still be entirely in {lang_name}, and each name must be "
+            f"written in that same script.\n"
+        )
+
+    # Ritika reads the scene's mood; this turns it into a writing style.
+    # Deliberately modulated, not theatrical — an over-acted describer reads as
+    # patronising, and professional AD keeps the narrator out of the film's way.
+    register = tone_register(segment.get("tone"))
+
     return (
+        f"{cast_note}"
+        f"Register for this scene: {register}\n\n"
         f"Character budget: return between {floor} and {char_budget} characters. "
         f"Aim close to {char_budget} when there is more than one beat worth "
         "mentioning — the listener wants coverage, not brevity for its own sake. "
@@ -276,12 +364,13 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
 def _generate_line(
     segment: dict, transcript: str, language: str, char_budget: int
 ) -> str:
-    """One narration line for one segment. Two bounded recovery paths.
+    """One narration line for one segment. One bounded recovery layer each.
 
-    Overshoot is retried once with the actual character count in the prompt,
-    then hard-truncated at a sentence boundary. Wrong-script output is retried
-    once with a stricter language reminder, then the stage fails — never let a
-    wrong-script line reach TTS.
+    Overshoot is retried once with the actual character count in the prompt.
+    If the retry still overshoots we accept it intact — tts_fit's re-pace /
+    shorten / skip loop will adapt. Never chop mid-sentence: a broken
+    utterance is worse than a slightly-fast one. Wrong-script output is
+    retried once with a stricter language reminder, then the stage fails.
     """
     system = _system_prompt(language)
     user = _user_prompt(segment, transcript, char_budget)
@@ -292,12 +381,10 @@ def _generate_line(
         retry_user = (
             user
             + f"\n\nYour previous reply was {len(text)} characters, over the "
-            f"{char_budget}-character limit. Rewrite the same idea under "
-            f"{char_budget} characters."
+            f"{char_budget}-character target. Rewrite the same idea under "
+            f"{char_budget} characters, keeping a complete sentence."
         )
         text = _sarvam_chat(system, retry_user)
-        if len(text) > char_budget:
-            text = _truncate_at_sentence(text, char_budget)
 
     if not script_ok(text, language):
         lang_name = LANGUAGE_PROMPT_NAME[language]
@@ -307,8 +394,6 @@ def _generate_line(
             f"Write ONLY in {lang_name}. Do not use any other script."
         )
         text = _sarvam_chat(strict_system, user)
-        if len(text) > char_budget:
-            text = _truncate_at_sentence(text, char_budget)
         if not script_ok(text, language):
             raise SystemExit(
                 f"narrate: model refused to write segment "
@@ -371,6 +456,7 @@ def write(job: Path, cfg: dict) -> None:
             "end": float(segment["end"]),
             "max_duration": float(segment["max_duration"]),
             "language": language,
+            "tone": segment.get("tone"),
             "text": text,
         })
         preview = text if len(text) <= 60 else text[:60] + "…"

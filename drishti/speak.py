@@ -52,7 +52,7 @@ from .common import (
     read_json,
     write_json,
 )
-from .config import FIT_TOLERANCE, SUPPORTED_TTS
+from .config import FIT_TOLERANCE, SUPPORTED_TTS, tone_params
 
 TTS_URL = f"{SARVAM_BASE_URL}/text-to-speech"
 CHAT_URL = f"{SARVAM_BASE_URL}/v1/chat/completions"
@@ -77,7 +77,8 @@ TEMPERATURE = 0.35
 # --------------------------------------------------------------------------
 
 
-def _synthesize(text: str, language: str, speaker: str, pace: float) -> bytes:
+def _synthesize(text: str, language: str, speaker: str, pace: float,
+                temperature: float = TEMPERATURE) -> bytes:
     """POST /text-to-speech and return the decoded WAV bytes.
 
     The base64 in audios[0] already carries the 44-byte RIFF header, so the
@@ -91,7 +92,7 @@ def _synthesize(text: str, language: str, speaker: str, pace: float) -> bytes:
         "pace": round(pace, 3),
         "speech_sample_rate": SAMPLE_RATE,
         "output_audio_codec": "wav",
-        "temperature": TEMPERATURE,
+        "temperature": round(temperature, 3),
         "enable_preprocessing": True,
     }
     headers = {"api-subscription-key": env_key("SARVAM_API_KEY")}
@@ -161,6 +162,7 @@ def _fit(
     language: str,
     speaker: str,
     wav_path: Path,
+    tone: str | None = None,
 ) -> tuple[str, float, float] | None:
     """Return (final_text, final_pace, final_wav_duration) if fit; None on skip.
 
@@ -168,9 +170,12 @@ def _fit(
     """
     limit = max_duration + FIT_TOLERANCE
 
-    # --- attempt 1: base pace ------------------------------------------------
-    pace = BASE_PACE
-    wav_bytes = _synthesize(text, language, speaker, pace)
+    # --- attempt 1: the tone's own pace --------------------------------------
+    # A tense scene is read faster and a gentle one is not stretched — the
+    # register slows a gentle line with punctuation rather than by drawling.
+    # align budgeted for this same pace, so attempt 1 should already fit.
+    pace, temperature = tone_params(tone, BASE_PACE)
+    wav_bytes = _synthesize(text, language, speaker, pace, temperature)
     wav_path.write_bytes(wav_bytes)
     actual = media_duration(wav_path)
     log(f"    attempt 1: pace={pace:.2f} actual={actual:.2f}s (max {max_duration:.2f}s)")
@@ -180,7 +185,7 @@ def _fit(
 
     # --- attempt 2: re-pace -------------------------------------------------
     pace = min(MAX_PACE, pace * actual / max_duration * 1.04)
-    wav_bytes = _synthesize(text, language, speaker, pace)
+    wav_bytes = _synthesize(text, language, speaker, pace, temperature)
     wav_path.write_bytes(wav_bytes)
     actual = media_duration(wav_path)
     log(f"    attempt 2: pace={pace:.2f} actual={actual:.2f}s")
@@ -204,7 +209,7 @@ def _fit(
         wav_path.unlink(missing_ok=True)
         return None
 
-    wav_bytes = _synthesize(shortened, language, speaker, pace)
+    wav_bytes = _synthesize(shortened, language, speaker, pace, temperature)
     wav_path.write_bytes(wav_bytes)
     actual = media_duration(wav_path)
     log(f"    attempt 3: pace={pace:.2f} actual={actual:.2f}s")
@@ -277,7 +282,8 @@ def synthesize(job: Path, cfg: dict) -> None:
         log(f"  segment {index} (max {max_duration:.2f}s): {text[:60]}"
             f"{'…' if len(text) > 60 else ''}")
 
-        result = _fit(text, max_duration, language, speaker, wav_path)
+        result = _fit(text, max_duration, language, speaker, wav_path,
+                      tone=item.get("tone"))
 
         if result is None:
             item["skipped"] = True

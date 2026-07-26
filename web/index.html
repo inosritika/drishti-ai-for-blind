@@ -555,7 +555,7 @@
     barFill.style.width = state.pct + "%";
     const word = STAGE_WORDS[state.stage] || state.stage;
     barLabel.textContent = state.error
-      ? "Stopped: " + state.error
+      ? "Stopped — " + String(state.error).split("\n")[0]
       : word + (state.stage === "done" ? "" : "…") + "  " + state.pct + "%";
 
     const bits = [];
@@ -622,7 +622,11 @@
       windows.append(card);
     }
 
-    if (state.log && state.log.length) {
+    if (state.error) {
+      logBox.textContent = String(state.error) +
+        (state.log && state.log.length ? "\n\n" + state.log.join("\n") : "");
+      logBox.hidden = false;
+    } else if (state.log && state.log.length) {
       logBox.textContent = state.log.join("\n");
       logBox.hidden = false;
     }
@@ -652,7 +656,9 @@
       return;
     }
     const file = clip.files[0];
-    status.textContent = "Uploading " + file.name + "…";
+    const langLabel = language.options[language.selectedIndex].textContent;
+    status.textContent = "Uploading " + file.name + " · " + langLabel +
+      (cast.value.trim() ? " · " + cast.value.trim() : "") + "…";
     result.hidden = false;
     if (playerObjectUrl) URL.revokeObjectURL(playerObjectUrl);
     playerObjectUrl = null;
