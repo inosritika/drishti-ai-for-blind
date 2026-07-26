@@ -244,6 +244,31 @@
     max-height: 12rem; overflow-y: auto;
   }
 
+  /* ---- script pathway ------------------------------------------------
+     Deliberately outside the numbered steps: this is a second, optional
+     doorway (a screenplay PDF), not a fourth thing to do before pressing
+     Describe. Same card language, no step number. */
+  .aside-card {
+    margin-top: 3rem;
+    background: var(--well); border: 1px solid var(--line);
+    border-left: 3px solid var(--muted); border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .aside-card h2 { font-size: 1.25rem; font-weight: 700; }
+  .aside-card > p.lede { color: var(--muted); font-size: .9rem; margin-top: .5rem; max-width: 46ch; }
+  .aside-card .body { margin-top: 1.2rem; }
+  .aside-card .go { margin-top: 1.2rem; }
+
+  .script-out {
+    margin-top: 1.2rem; padding: 1.1rem 1.2rem;
+    background: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .78rem; line-height: 1.6; color: var(--text);
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 26rem; overflow-y: auto;
+  }
+  .script-out[hidden] { display: none; }
+
   .how { margin-top: 4rem; border-top: 1px solid var(--line); padding-top: 2.5rem; }
   .how h2 { font-size: 1.05rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
   .how ol { margin: 1.2rem 0 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: .8rem; }
@@ -359,6 +384,39 @@
       <ul class="windows" id="windows"></ul>
       <pre class="log" id="log" hidden aria-label="Pipeline log"></pre>
     </section>
+
+    <form class="aside-card" id="script-form" aria-labelledby="script-title">
+      <h2 id="script-title"><label for="script-pdf">Have the script? Add it too</label></h2>
+      <p class="lede">Upload the screenplay as a PDF and Sarvam Document
+         Intelligence reads the written script out of it — character names,
+         scene headings and dialogue, in reading order.</p>
+      <div class="body">
+        <label class="file-label" for="script-pdf">Choose a PDF</label>
+        <input type="file" id="script-pdf" name="script-pdf" accept="application/pdf,.pdf">
+        <p class="picked" id="script-picked" aria-live="polite"></p>
+
+        <label class="or" for="script-language" style="letter-spacing:.14em">WRITTEN IN</label>
+        <select id="script-language" name="script-language">
+          <option value="en-IN" selected>English</option>
+          <option value="hi-IN">Hindi — हिन्दी</option>
+          <option value="bn-IN">Bengali — বাংলা</option>
+          <option value="gu-IN">Gujarati — ગુજરાતી</option>
+          <option value="kn-IN">Kannada — ಕನ್ನಡ</option>
+          <option value="ml-IN">Malayalam — മലയാളം</option>
+          <option value="mr-IN">Marathi — मराठी</option>
+          <option value="od-IN">Odia — ଓଡ଼ିଆ</option>
+          <option value="pa-IN">Punjabi — ਪੰਜਾਬੀ</option>
+          <option value="ta-IN">Tamil — தமிழ்</option>
+          <option value="te-IN">Telugu — తెలుగు</option>
+        </select>
+
+        <button type="submit" class="go" id="script-go">Read the script</button>
+        <output class="status" id="script-status" aria-live="polite"></output>
+        <p class="hint"><kbd>S</kbd>jumps here. Up to 10 pages. Optional — the
+           described video does not need it.</p>
+        <pre class="script-out" id="script-out" hidden aria-label="Extracted script"></pre>
+      </div>
+    </form>
 
     <section class="how" aria-labelledby="how-title">
       <h2 id="how-title">How it works</h2>
@@ -661,6 +719,77 @@
 
   say.addEventListener("click", startRecording);
 
+  // ------------------------------------------------------------------
+  // Script pathway. A screenplay PDF goes to Sarvam Document Intelligence
+  // via our server; the written script comes back as text. It is a job API
+  // with its own queue, so the server answers with an id and we poll — the
+  // same contract as /api/describe, and for the same reason.
+  //
+  // Nothing here touches the describe flow. Failure prints and stops.
+  // ------------------------------------------------------------------
+  const scriptForm = document.getElementById("script-form");
+  const scriptPdf = document.getElementById("script-pdf");
+  const scriptPicked = document.getElementById("script-picked");
+  const scriptLanguage = document.getElementById("script-language");
+  const scriptStatus = document.getElementById("script-status");
+  const scriptOut = document.getElementById("script-out");
+
+  scriptPdf.addEventListener("change", () => {
+    if (scriptPdf.files.length) {
+      const f = scriptPdf.files[0];
+      scriptPicked.innerHTML = "Selected: <strong></strong> (" + (f.size / 1e3).toFixed(0) + " KB)";
+      scriptPicked.querySelector("strong").textContent = f.name;
+    } else {
+      scriptPicked.textContent = "";
+    }
+  });
+
+  function pollScript(scriptId) {
+    fetch("/api/script/" + scriptId).then((r) => r.json()).then((state) => {
+      if (state.state === "done") {
+        scriptOut.textContent = state.text || "(the PDF held no readable text)";
+        scriptOut.hidden = false;
+        const pages = state.pages ? state.pages + (state.pages === 1 ? " page" : " pages") : "the PDF";
+        scriptStatus.textContent = "Read " + pages + " — " + (state.characters || 0) + " characters below." +
+          (state.pages_failed ? "  " + state.pages_failed + " page(s) failed." : "");
+        speak("The script is ready. " + (state.characters || 0) + " characters read.");
+        return;
+      }
+      if (state.state === "error" || state.error) {
+        scriptStatus.textContent = "Could not read the script: " + (state.error || "unknown error");
+        return;
+      }
+      setTimeout(() => pollScript(scriptId), 1500);
+    }).catch(() => { scriptStatus.textContent = "Lost contact with the server."; });
+  }
+
+  scriptForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!scriptPdf.files.length) {
+      scriptStatus.textContent = "Choose a PDF first — press S to jump to the file picker.";
+      scriptPdf.focus();
+      return;
+    }
+    const file = scriptPdf.files[0];
+    scriptOut.hidden = true;
+    scriptOut.textContent = "";
+    scriptStatus.textContent = "Uploading " + file.name + " — reading it can take up to a minute…";
+
+    const query = "?name=" + encodeURIComponent(file.name) +
+                  "&language=" + encodeURIComponent(scriptLanguage.value);
+    fetch("/api/script" + query, { method: "POST", body: file })
+      .then((r) => r.json())
+      .then((started) => {
+        if (!started.script) throw new Error(started.error || "could not start");
+        scriptStatus.textContent = "Reading the script…";
+        pollScript(started.script);
+      })
+      .catch((err) => {
+        scriptStatus.textContent = "Could not start: " + err.message +
+          ". Is the DRISHTI server running? Use “make web”.";
+      });
+  });
+
   // Keyboard shortcuts. Never steal keys from a control the user is operating.
   const HELP =
     "Drishti turns a short video into an audio-described video. " +
@@ -668,6 +797,8 @@
     "Press L to choose the narration language from a list, or press V and " +
     "simply say it — in any language. The default matches the video's own " +
     "language automatically. Press D to start describing. " +
+    "If you also have the screenplay as a PDF, press S to add it and Drishti " +
+    "will read the written script out of it. " +
     "Press question mark to hear this again.";
 
   function speak(text) {
@@ -687,6 +818,7 @@
     else if (key === "l") { e.preventDefault(); language.focus(); }
     else if (key === "v") { e.preventDefault(); say.focus(); startRecording(); }
     else if (key === "d") { e.preventDefault(); form.requestSubmit(); }
+    else if (key === "s") { e.preventDefault(); scriptPdf.focus(); }
     else if (e.key === "?") { e.preventDefault(); speak(HELP); }
   });
 </script>

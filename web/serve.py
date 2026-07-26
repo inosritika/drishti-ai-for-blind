@@ -5,12 +5,18 @@ installed and no build step.
 
 Why a server at all when the page is static: both features need the Sarvam
 key, and it must never ship inside page JavaScript. This keeps the key in
-.env on the laptop and exposes three endpoints:
+.env on the laptop and exposes five endpoints:
 
     POST /api/hear      body: audio/wav  ->  {"language": "ta-IN"|null,
                                               "transcript": str, "heard": str}
     POST /api/describe  body: video/*    ->  {"job": "<id>"}
     GET  /api/job/<id>                   ->  status.json + narration + segments
+    POST /api/script    body: application/pdf -> {"script": "<id>"}
+    GET  /api/script/<id>                ->  {"state", "text", "pages", …}
+
+`script` is a SEPARATE pathway, not a pipeline stage: a screenplay PDF goes to
+Sarvam Document Intelligence and the written script comes back as text on disk.
+Nothing in the describe flow reads it yet, so it can never affect a run.
 
 `describe` runs the real pipeline as a SUBPROCESS, never in-process: a stage
 that dies must not take the server with it, and the child's stdout is the log
@@ -47,14 +53,21 @@ sys.path.insert(0, str(REPO))
 
 from drishti.common import SARVAM_BASE_URL, env_key, http_multipart, read_json  # noqa: E402
 from drishti.config import get_profile, new_job, normalize_language  # noqa: E402
+from drishti.script_doc import extract_script  # noqa: E402
 
 PORT = 8080
 MAX_AUDIO = 4 * 1024 * 1024    # a few seconds of 16kHz mono WAV is ~100KB
 MAX_VIDEO = 120 * 1024 * 1024  # 29s of 720p is ~12MB; leave generous room
+MAX_PDF = 25 * 1024 * 1024     # ten pages of a screenplay is well under 1MB
 
 JOB_ID = re.compile(r"^[0-9]{8}_[0-9]{6}_[a-z0-9-]+$")
 # Job id -> tail of the child's stdout, so a failed run can explain itself.
 LOGS: dict[str, list[str]] = {}
+
+# Script id -> {"state", "text", "error", …}. In memory only: the durable copy
+# is runs/scripts/<id>/, written by script_doc.
+SCRIPTS: dict[str, dict] = {}
+SCRIPTS_ROOT = REPO / "runs" / "scripts"
 
 # Language names as people actually say them: English name, endonym, the
 # Devanagari spelling (a Hindi speaker asking for Tamil says "तमिल"), and
@@ -177,6 +190,42 @@ def job_state(job_id: str) -> dict | None:
     }
 
 
+def start_script(pdf: bytes, filename: str, language: str) -> str:
+    """Stage the PDF and parse it in the background, same shape as start_job.
+
+    Document Intelligence is a job API with its own polling, so this can take
+    the better part of a minute — it must not hold the request open.
+    """
+    from datetime import datetime
+
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", Path(filename).stem).strip("-").lower()[:40]
+    script_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug or 'script'}"
+    out_dir = SCRIPTS_ROOT / script_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    staged = out_dir / (Path(filename).name or "script.pdf")
+    staged.write_bytes(pdf)
+
+    SCRIPTS[script_id] = {"state": "running", "name": staged.name, "language": language}
+
+    def run() -> None:
+        try:
+            manifest = extract_script(staged, out_dir, {"language": language})
+            SCRIPTS[script_id] = {
+                **SCRIPTS[script_id],
+                "state": "done",
+                "text": (out_dir / "script.md").read_text(encoding="utf-8"),
+                "pages": manifest.get("pages"),
+                "characters": manifest.get("characters"),
+                "pages_failed": manifest.get("pages_failed"),
+            }
+        except Exception as exc:
+            SCRIPTS[script_id] = {**SCRIPTS[script_id], "state": "error", "error": str(exc)}
+
+    threading.Thread(target=run, daemon=True).start()
+    return script_id
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
@@ -191,6 +240,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
         path = self.path.split("?")[0]
+
+        if path.startswith("/api/script/"):
+            state = SCRIPTS.get(path[len("/api/script/"):])
+            self._send_json(200 if state else 404, state or {"error": "no such script"})
+            return
 
         if path.startswith("/api/job/"):
             state = job_state(path[len("/api/job/"):])
@@ -244,6 +298,22 @@ class Handler(BaseHTTPRequestHandler):
                     query.get("language", ["auto"])[0],
                 )
                 self._send_json(200, {"job": job_id})
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+            return
+
+        if path == "/api/script":
+            if not 0 < length <= MAX_PDF:
+                self._send_json(413, {"error": "PDF too large — 25MB maximum"})
+                return
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                script_id = start_script(
+                    self.rfile.read(length),
+                    query.get("name", ["script.pdf"])[0],
+                    query.get("language", ["en-IN"])[0],
+                )
+                self._send_json(200, {"script": script_id})
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
             return

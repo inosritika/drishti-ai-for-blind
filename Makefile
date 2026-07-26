@@ -1,4 +1,4 @@
-.PHONY: help doctor install run fixture demo api web dev clean-dev
+.PHONY: help doctor install run fixture demo api web dev clean-dev script
 
 help:
 	@echo "make doctor              check binaries, python, and API keys"
@@ -6,6 +6,7 @@ help:
 	@echo "make run CLIP=path.mp4   run the pipeline in dev profile"
 	@echo "make demo CLIP=path.mp4  run in demo profile (strict checks)"
 	@echo "make fixture             run the pipeline against the fixture job"
+	@echo "make script PDF=s.pdf    extract a written script from a PDF"
 	@echo "make api                 start FastAPI on :8000   (after the gate)"
 	@echo "make web                 start Vite on :5173      (after the gate)"
 	@echo "make clean-dev           delete runs/dev (never touches runs/demo)"
@@ -26,6 +27,10 @@ demo:
 
 fixture:
 	python3 -m drishti.pipeline --job fixtures/jobs/english_sample --check
+
+script:  # standalone pathway — no job dir, no pipeline, no consumer yet
+	@test -n "$(PDF)" || (echo "usage: make script PDF=path/to/screenplay.pdf"; exit 1)
+	python3 -m drishti.script_doc "$(PDF)"
 
 api:
 	python3 -m uvicorn api.main:app --reload --port 8000

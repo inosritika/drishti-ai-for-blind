@@ -69,6 +69,22 @@ runs/dev/<job_id>/
   status.json       Aryan (pipeline only — no stage writes this)
 ```
 
+## Script from a PDF (side pathway, not a stage)
+
+`drishti/script_doc.py` sends a screenplay PDF to Sarvam Document Intelligence
+and writes the written script out as text. It is deliberately **not** in
+`STAGE_ORDER`, no stage imports it, and it never writes into a job directory —
+so it cannot affect a run.
+
+```bash
+make script PDF=path/to/screenplay.pdf     # -> runs/scripts/<name>/script.md
+```
+
+Output lands in `runs/scripts/<name>/`: `script.md` (the script), `pages.json`
+(the API's structured page data), `script.json` (manifest) and `raw.zip`. In the
+UI it is the “Have the script? Add it too” card — `POST /api/script`, then poll
+`GET /api/script/<id>`. Nothing consumes the text yet; it just lands on disk.
+
 ## dev vs demo
 
 ```bash
