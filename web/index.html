@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DRISHTI — hear what you can't see</title>
+<style>
+  /* ------------------------------------------------------------------
+     The audience is blind and low-vision, so the design IS the
+     accessibility: one committed high-contrast dark theme, oversized
+     type, thick focus rings, big hit targets. Nothing loads from the
+     network — venue wifi must not be able to break this page.
+     ------------------------------------------------------------------ */
+  :root {
+    --ink: #0e0f12;        /* page ground */
+    --well: #16181d;       /* raised panels */
+    --line: #2a2e37;       /* hairlines */
+    --text: #f2efe6;       /* warm off-white, ~15.5:1 on ink */
+    --muted: #a7aebc;      /* secondary, still 7:1 on ink */
+    --accent: #ffb258;     /* warm amber — audio warmth, 9.6:1 on ink */
+    --accent-ink: #241503; /* text on amber */
+    --focus: #ffd9a8;
+    --step: 3.5rem;        /* step-number column */
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+
+  html { font-size: 20px; }  /* the whole page runs large on purpose */
+
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: "Avenir Next", Avenir, Seravek, "Segoe UI", Ubuntu, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Focus is the primary navigation signal for our users: make it loud. */
+  :focus-visible {
+    outline: 4px solid var(--focus);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  .skip {
+    position: absolute; left: -999px; top: 0;
+    background: var(--accent); color: var(--accent-ink);
+    padding: .6rem 1.2rem; font-weight: 700; z-index: 10;
+  }
+  .skip:focus { left: 1rem; top: 1rem; }
+
+  .shell { max-width: 42rem; margin: 0 auto; padding: 0 1.25rem 5rem; }
+
+  header.site { padding: 2.5rem 0 0; }
+  .brand {
+    display: flex; align-items: baseline; gap: .75rem;
+    letter-spacing: .12em;
+  }
+  .brand strong { font-size: 1.1rem; font-weight: 700; }
+  .brand span { color: var(--muted); font-size: .8rem; letter-spacing: .08em; }
+
+  .hero { padding: 3.5rem 0 3rem; border-bottom: 1px solid var(--line); }
+  .hero h1 {
+    font-size: 2.8rem; line-height: 1.12; font-weight: 700;
+    text-wrap: balance; max-width: 16ch;
+  }
+  .hero h1 em { color: var(--accent); font-style: normal; }
+  .hero p {
+    margin-top: 1.2rem; color: var(--muted); max-width: 34ch;
+    font-size: 1.05rem;
+  }
+
+  main { padding-top: 2.5rem; }
+
+  .steps { display: flex; flex-direction: column; gap: 1.25rem; list-style: none; padding: 0; }
+
+  .step {
+    background: var(--well);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1.5rem 1.5rem 1.6rem;
+    display: grid;
+    grid-template-columns: var(--step) 1fr;
+    gap: 0 .5rem;
+  }
+  .step .num {
+    color: var(--accent); font-weight: 700; font-size: 1.6rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .step h2 { font-size: 1.25rem; font-weight: 700; grid-column: 2; }
+  .step .body { grid-column: 2; margin-top: .6rem; }
+  .step .hint { color: var(--muted); font-size: .85rem; margin-top: .7rem; max-width: 44ch; }
+  .step kbd {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .75rem; color: var(--accent);
+    border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 5px; padding: .1rem .45rem; margin-right: .35rem;
+  }
+
+  /* Controls: minimum 48px hit targets, everywhere. */
+  .file-label {
+    display: inline-flex; align-items: center; gap: .7rem;
+    background: var(--accent); color: var(--accent-ink);
+    font-weight: 700; font-size: 1rem;
+    padding: .85rem 1.5rem; border-radius: 10px;
+    cursor: pointer; min-height: 48px;
+  }
+  .file-label:hover { filter: brightness(1.07); }
+  input[type="file"] {
+    position: absolute; width: 1px; height: 1px;
+    clip-path: inset(50%); overflow: hidden;
+  }
+  /* Keep the focus ring visible even though the input is visually hidden */
+  input[type="file"]:focus-visible + .file-label,
+  .file-label:has(+ input[type="file"]:focus-visible) {
+    outline: 4px solid var(--focus); outline-offset: 3px;
+  }
+
+  .picked { margin-top: .8rem; font-size: .9rem; color: var(--muted); min-height: 1.4em; }
+  .picked strong { color: var(--text); }
+
+  select {
+    width: 100%; max-width: 24rem; min-height: 48px;
+    font: inherit; font-size: 1rem;
+    color: var(--text); background: var(--ink);
+    border: 2px solid var(--line); border-radius: 10px;
+    padding: .6rem .9rem;
+  }
+  select:hover { border-color: var(--muted); }
+
+  .go {
+    width: 100%; min-height: 60px;
+    font: inherit; font-size: 1.15rem; font-weight: 700;
+    background: var(--accent); color: var(--accent-ink);
+    border: none; border-radius: 12px; cursor: pointer;
+    padding: 1rem 1.5rem;
+  }
+  .go:hover { filter: brightness(1.07); }
+  .go[aria-disabled="true"] { background: var(--well); color: var(--muted); cursor: not-allowed; }
+
+  output.status {
+    display: block; margin-top: 1rem; min-height: 1.5em;
+    font-size: .95rem; color: var(--accent);
+  }
+  output.status code {
+    display: block; margin-top: .6rem; padding: .8rem 1rem;
+    background: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .75rem; color: var(--text);
+    overflow-x: auto; white-space: pre;
+  }
+
+  .how { margin-top: 4rem; border-top: 1px solid var(--line); padding-top: 2.5rem; }
+  .how h2 { font-size: 1.05rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .how ol { margin: 1.2rem 0 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: .8rem; }
+  .how li { font-size: .95rem; }
+  .how li strong { color: var(--accent); font-weight: 700; }
+  .how li span { color: var(--muted); }
+
+  footer.site {
+    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: .8rem;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .step { transition: border-color .15s ease; }
+    .step:focus-within { border-color: var(--accent); }
+  }
+  @media (max-width: 540px) {
+    html { font-size: 18px; }
+    .hero h1 { font-size: 2.1rem; }
+    .step { grid-template-columns: 2.2rem 1fr; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the form</a>
+
+<div class="shell">
+  <header class="site">
+    <p class="brand"><strong>DRISHTI</strong> <span>AUDIO DESCRIPTION · BUILT ON SARVAM VOICE</span></p>
+  </header>
+
+  <section class="hero" aria-labelledby="tagline">
+    <h1 id="tagline">Hear the film <em>you can't see.</em></h1>
+    <p>Add a video. DRISHTI finds the silences between dialogue and speaks
+       what's happening on screen — in your language.</p>
+  </section>
+
+  <main id="main">
+    <form id="describe-form">
+      <ol class="steps">
+        <li class="step">
+          <span class="num" aria-hidden="true">1</span>
+          <h2><label for="clip">Add your video</label></h2>
+          <div class="body">
+            <label class="file-label" for="clip">Choose a video file</label>
+            <input type="file" id="clip" name="clip" accept="video/*">
+            <p class="picked" id="picked" aria-live="polite"></p>
+            <p class="hint"><kbd>U</kbd>jumps here. Up to 30 seconds for now.</p>
+          </div>
+        </li>
+
+        <li class="step">
+          <span class="num" aria-hidden="true">2</span>
+          <h2><label for="language">Choose the narration language</label></h2>
+          <div class="body">
+            <select id="language" name="language">
+              <option value="auto" selected>Match the video's own language (recommended)</option>
+              <option value="en-IN">English</option>
+              <option value="hi-IN">Hindi — हिन्दी</option>
+              <option value="bn-IN">Bengali — বাংলা</option>
+              <option value="gu-IN">Gujarati — ગુજરાતી</option>
+              <option value="kn-IN">Kannada — ಕನ್ನಡ</option>
+              <option value="ml-IN">Malayalam — മലയാളം</option>
+              <option value="mr-IN">Marathi — मराठी</option>
+              <option value="od-IN">Odia — ଓଡ଼ିଆ</option>
+              <option value="pa-IN">Punjabi — ਪੰਜਾਬੀ</option>
+              <option value="ta-IN">Tamil — தமிழ்</option>
+              <option value="te-IN">Telugu — తెలుగు</option>
+            </select>
+            <p class="hint"><kbd>L</kbd>jumps here. On auto, DRISHTI listens to the
+               video and answers in its language. A silent film has no voice to
+               listen to — choose a language for those.</p>
+          </div>
+        </li>
+
+        <li class="step">
+          <span class="num" aria-hidden="true">3</span>
+          <h2><label for="go">Describe it</label></h2>
+          <div class="body">
+            <button type="submit" class="go" id="go">Describe my video</button>
+            <output class="status" id="status" aria-live="polite"></output>
+            <p class="hint"><kbd>D</kbd>starts. <kbd>?</kbd>reads these
+               instructions aloud at any time.</p>
+          </div>
+        </li>
+      </ol>
+    </form>
+
+    <section class="how" aria-labelledby="how-title">
+      <h2 id="how-title">How it works</h2>
+      <ol>
+        <li><strong>Listen.</strong> <span>Sarvam Saaras transcribes the audio in
+            1.5-second chunks and finds every window where nobody is speaking —
+            even through continuous music.</span></li>
+        <li><strong>Look.</strong> <span>A vision model watches the frames and
+            writes down what happens, moment by moment.</span></li>
+        <li><strong>Speak.</strong> <span>Each quiet window gets one spoken line in
+            your language via Sarvam Bulbul — measured, re-paced and fitted so it
+            never talks over the film.</span></li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="site">
+    <p>DRISHTI · Sarvam AI Epoch Buildathon 2026 · works offline, no account, no tracking</p>
+  </footer>
+</div>
+
+<script>
+  "use strict";
+
+  const clip = document.getElementById("clip");
+  const picked = document.getElementById("picked");
+  const language = document.getElementById("language");
+  const form = document.getElementById("describe-form");
+  const status = document.getElementById("status");
+
+  clip.addEventListener("change", () => {
+    if (clip.files.length) {
+      const f = clip.files[0];
+      const mb = (f.size / 1e6).toFixed(1);
+      picked.innerHTML = "Selected: <strong></strong> (" + mb + " MB)";
+      picked.querySelector("strong").textContent = f.name;
+    } else {
+      picked.textContent = "";
+    }
+  });
+
+  // The processing backend isn't wired to this page yet — say so honestly and
+  // hand over the exact command, rather than pretending to work.
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!clip.files.length) {
+      status.textContent = "Choose a video first — press U to jump to the file picker.";
+      clip.focus();
+      return;
+    }
+    const lang = language.value;
+    const langFlag = lang === "auto" ? "" : " --language " + lang;
+    status.innerHTML =
+      "Processing from this page is coming. For now, a teammate runs:" +
+      "<code></code>";
+    status.querySelector("code").textContent =
+      "python3 -m drishti.pipeline --clip " + clip.files[0].name + langFlag + " --profile demo";
+  });
+
+  // Keyboard shortcuts. Never steal keys from a control the user is operating.
+  const HELP =
+    "Drishti turns a short video into an audio-described video. " +
+    "Three steps. Press U to choose a video file, up to 30 seconds. " +
+    "Press L to choose the narration language. The default matches the " +
+    "video's own language automatically. Press D to start describing. " +
+    "Press question mark to hear this again.";
+
+  function speak(text) {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    window.speechSynthesis.speak(u);
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return;
+    const key = e.key.toLowerCase();
+    if (key === "u") { e.preventDefault(); clip.focus(); }
+    else if (key === "l") { e.preventDefault(); language.focus(); }
+    else if (key === "d") { e.preventDefault(); form.requestSubmit(); }
+    else if (e.key === "?") { e.preventDefault(); speak(HELP); }
+  });
+</script>
+</body>
+</html>
