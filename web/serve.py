@@ -147,7 +147,31 @@ def start_job(video: bytes, filename: str, language: str, cast: str = "") -> str
         for line in child.stdout:
             LOGS[job_id].append(line.rstrip())
             del LOGS[job_id][:-40]  # keep the tail bounded
-        child.wait()
+        code = child.wait()
+
+        # The pipeline records its own error for anything it anticipates, but
+        # it cannot record what it did not survive — a failure outside a stage's
+        # try block, an import error, a kill. Whatever the cause, a dead child
+        # with nothing written would leave the page polling for ever. Treat a
+        # non-zero exit as the last word and put the reason where the UI reads
+        # it, so this can never hang again regardless of how the run died.
+        status_path = job / "status.json"
+        status = read_json(status_path, default={}) or {}
+        if code != 0 and not status.get("error"):
+            tail = [line for line in LOGS.get(job_id, []) if line.strip()]
+            # The runner indents progress and prints failures flush-left, so
+            # the unindented run at the end IS the message meant for a human.
+            message: list[str] = []
+            for line in reversed(tail):
+                if line[:1].isspace():
+                    if message:
+                        break
+                    continue
+                message.insert(0, line)
+            status["error"] = ("\n".join(message) or "\n".join(tail[-4:])
+                               or f"the run exited with code {code}")
+            status["stage"] = status.get("stage") or "failed"
+            status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2))
 
     threading.Thread(target=run, daemon=True).start()
     return job_id

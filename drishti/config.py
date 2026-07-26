@@ -62,10 +62,27 @@ DURATION_TOLERANCE = 0.05  # output must preserve source duration within this
 # seconds" the model returned a line that rendered in 6.23s, because seconds
 # mean nothing to it. Characters it can count.
 #
-# Latin script carries fewer sounds per character than an Indic abugida, so
-# English runs further per character. Anything unmeasured takes the slower
-# Indic rate — under-filling a window is recoverable, overrunning it is not.
-SPEECH_RATES: dict[str, float] = {"en-IN": 14.0}
+# We guessed Indic script would run *slower* per character than Latin, on the
+# theory that an abugida packs more sound into each character. Measurement says
+# the opposite, and the guess cost us a third of every Hindi window:
+#
+#   chars   duration   chars/s
+#      53     3.56s      14.89     hi-IN, pace 1.05, speaker anand
+#      85     5.26s      16.17
+#     107     7.29s      14.67
+#     109     7.28s      14.96
+#
+# Devanagari matras, nuktas and viramas are separate codepoints that carry no
+# duration of their own, so "दरवाज़े" is seven characters but three syllables.
+# Per character, Hindi therefore runs *further* than English, not less far.
+# Rates are measured on lines of 50+ characters: a short line is dominated by
+# fixed lead-in and lead-out silence and reads artificially slow (a 37-char
+# line clocked 17.68 chars/s), which would over-budget exactly the short gaps
+# that have the least room to recover.
+SPEECH_RATES: dict[str, float] = {"en-IN": 14.0, "hi-IN": 15.0}
+# Anything still unmeasured keeps the cautious rate — under-filling a window is
+# recoverable, overrunning it is not. Both languages we have measured came in
+# at 14–15, so this is deliberately pessimistic rather than an estimate.
 DEFAULT_SPEECH_RATE = 11.0
 # Aim short of the brim so the fit loop has room to re-pace instead of skip.
 BUDGET_MARGIN = 0.9

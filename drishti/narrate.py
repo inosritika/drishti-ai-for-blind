@@ -223,6 +223,47 @@ def _format_beat(beat: dict) -> str:
     )
 
 
+_NAME_IN_SCRIPT: dict[tuple[str, str], str] = {}
+
+
+def localize_name(name: str, language: str) -> str:
+    """The character's name written in the output language's own script.
+
+    Handing the model an English name inside a Hindi prompt drags the whole
+    line into Latin: first it answered "Mr Bean grimaced and" (plain English),
+    then "Mr Bean ka haath mug ko side" (romanised Hindi). Both were correctly
+    rejected by the script check, and no amount of restating the language in
+    the note fixed it — the Latin name in front of it was the stronger signal.
+
+    So we transliterate once per (name, language) and put the result in the
+    note, leaving nothing Latin to copy. This is also simply right: a
+    Devanagari listener should hear मिस्टर बीन, not an English word dropped
+    into a Hindi sentence.
+
+    Falls back to the original name if the model returns something in the
+    wrong script — a Latin name is a blemish, a failed stage is a broken demo.
+    """
+    if script_ok(name, language):
+        return name  # already in the right script (or the language is Latin)
+    key = (name, language)
+    if key in _NAME_IN_SCRIPT:
+        return _NAME_IN_SCRIPT[key]
+
+    lang_name = LANGUAGE_PROMPT_NAME.get(language, language)
+    try:
+        written = _sarvam_chat(
+            f"You transliterate names into {lang_name}. Reply with the "
+            f"transliterated name only — no explanation, no quotes.",
+            f"Write this character name in {lang_name}: {name}",
+        )
+    except Exception:  # noqa: BLE001 — never fail the stage over a name
+        written = ""
+    if not written or not script_ok(written, language):
+        written = name
+    _NAME_IN_SCRIPT[key] = written
+    return written
+
+
 def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
     beats = segment.get("beats", [])
     beats_block = "\n".join(_format_beat(beat) for beat in beats)
@@ -278,14 +319,24 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
     cast = segment.get("cast") or {}
     cast_note = ""
     if cast:
-        rows = "\n".join(f"  - {name}: {description}"
+        language = segment.get("language") or "en-IN"
+        rows = "\n".join(f"  - {localize_name(name, language)}: {description}"
                          for name, description in cast.items())
+        # The names and descriptions here are English, and saying so in English
+        # is enough to pull the whole line into English: asked for Hindi with a
+        # cast note attached, the model returned "Mr Bean grimaced and" and the
+        # script check rejected it. Restate the output language inside the note
+        # and require the name in that script — which is also correct practice,
+        # since a Devanagari listener should hear मिस्टर बीन, not a Latin word.
+        lang_name = LANGUAGE_PROMPT_NAME[segment.get("language") or "en-IN"]
         cast_note = (
             "\n\nA viewer told us who is in this clip:\n" + rows + "\n"
             "When a beat refers to one of these people, use the NAME rather "
-            "than describing them again. Introduce a name with a brief "
-            "description the first time only. Anyone NOT listed keeps their "
+            "than describing them again. Anyone NOT listed keeps their "
             "description — never invent or guess a name for them.\n"
+            f"These names are written in English for your reference only. Your "
+            f"reply must still be entirely in {lang_name}, and each name must be "
+            f"written in that same script.\n"
         )
 
     return (
