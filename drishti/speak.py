@@ -206,8 +206,17 @@ def _fit(
     log(f"    shortened: {len(text)}→{len(shortened)} chars target={target_chars}")
 
     if not shortened or shortened == text:
-        wav_path.unlink(missing_ok=True)
-        return None
+        # sarvam-30b sometimes hands the input straight back — and that verbatim
+        # reply is cached, so calling again with the same target would replay
+        # it. Retry once with a tighter target (a different payload, a fresh
+        # cache key) before declaring the segment unfittable: this exact no-op
+        # cost the Chalti brawl demo half its narration.
+        tighter = max(1, floor(target_chars * 0.9))
+        shortened = _shorten(text, tighter, language)
+        log(f"    shorten retry: {len(text)}→{len(shortened)} chars target={tighter}")
+        if not shortened or shortened == text:
+            wav_path.unlink(missing_ok=True)
+            return None
 
     wav_bytes = _synthesize(shortened, language, speaker, pace, temperature)
     wav_path.write_bytes(wav_bytes)
