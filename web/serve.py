@@ -3,12 +3,19 @@
 Stdlib only, on purpose: `make web` must work on any laptop with nothing
 installed and no build step.
 
-Why a server at all when the page is static: the mic feature sends audio to
-Saaras, and the API key must never ship inside page JavaScript. This proxy
-keeps the key in .env on the laptop and exposes exactly one endpoint:
+Why a server at all when the page is static: both features need the Sarvam
+key, and it must never ship inside page JavaScript. This keeps the key in
+.env on the laptop and exposes three endpoints:
 
-    POST /api/hear   body: audio/wav  ->  {"language": "ta-IN"|null,
-                                           "transcript": str, "heard": str}
+    POST /api/hear      body: audio/wav  ->  {"language": "ta-IN"|null,
+                                              "transcript": str, "heard": str}
+    POST /api/describe  body: video/*    ->  {"job": "<id>"}
+    GET  /api/job/<id>                   ->  status.json + narration + segments
+
+`describe` runs the real pipeline as a SUBPROCESS, never in-process: a stage
+that dies must not take the server with it, and the child's stdout is the log
+we show the user. Progress needs no invention either — the runner already
+writes stage and pct into status.json, so polling just reads it.
 
 The user says a language — "Hindi", "தமிழ்", "मराठी में सुनाओ" — and we
 resolve it two ways, either one sufficient:
@@ -24,21 +31,30 @@ select Hindi, not English.
 
 from __future__ import annotations
 
-import io
 import json
+import re
+import subprocess
 import sys
 import tempfile
+import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 WEB_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(WEB_ROOT.parent))
+REPO = WEB_ROOT.parent
+sys.path.insert(0, str(REPO))
 
-from drishti.common import SARVAM_BASE_URL, env_key, http_multipart  # noqa: E402
-from drishti.config import normalize_language  # noqa: E402
+from drishti.common import SARVAM_BASE_URL, env_key, http_multipart, read_json  # noqa: E402
+from drishti.config import get_profile, new_job, normalize_language  # noqa: E402
 
 PORT = 8080
-MAX_BODY = 4 * 1024 * 1024  # a few seconds of 16kHz mono WAV is ~100KB
+MAX_AUDIO = 4 * 1024 * 1024    # a few seconds of 16kHz mono WAV is ~100KB
+MAX_VIDEO = 120 * 1024 * 1024  # 29s of 720p is ~12MB; leave generous room
+
+JOB_ID = re.compile(r"^[0-9]{8}_[0-9]{6}_[a-z0-9-]+$")
+# Job id -> tail of the child's stdout, so a failed run can explain itself.
+LOGS: dict[str, list[str]] = {}
 
 # Language names as people actually say them: English name, endonym, the
 # Devanagari spelling (a Hindi speaker asking for Tamil says "तमिल"), and
@@ -103,6 +119,64 @@ def hear(wav_bytes: bytes) -> dict:
     return {"language": language, "transcript": transcript, "heard": how}
 
 
+def start_job(video: bytes, filename: str, language: str) -> str:
+    """Create a job directory, then run the pipeline on it in the background."""
+    profile = get_profile("dev")
+    suffix = Path(filename).suffix.lower() or ".mp4"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+        handle.write(video)
+        staged = Path(handle.name)
+    try:
+        # new_job copies the clip in as input.mp4 and names the directory.
+        job = new_job(profile, staged, label=Path(filename).stem or "web")
+    finally:
+        staged.unlink(missing_ok=True)
+
+    job_id = job.name
+    LOGS[job_id] = []
+    command = [sys.executable, "-m", "drishti.pipeline", "--job", str(job),
+               "--profile", profile.name]
+    if language and language != "auto":
+        command += ["--language", language]
+
+    def run() -> None:
+        child = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in child.stdout:
+            LOGS[job_id].append(line.rstrip())
+            del LOGS[job_id][:-40]  # keep the tail bounded
+        child.wait()
+
+    threading.Thread(target=run, daemon=True).start()
+    return job_id
+
+
+def job_state(job_id: str) -> dict | None:
+    """status.json plus everything the results view needs, in one payload."""
+    job = (get_profile("dev").jobs_root / job_id).resolve()
+    if not JOB_ID.match(job_id) or not job.is_dir():
+        return None
+    status = read_json(job / "status.json", default={})
+    return {
+        "job": job_id,
+        "stage": status.get("stage", "queued"),
+        "pct": status.get("pct", 0),
+        "error": status.get("error"),
+        "problems": status.get("problems") or [],
+        "output_language": status.get("output_language"),
+        "source_language": status.get("source_language"),
+        "language_confidence": status.get("language_confidence"),
+        "api": status.get("api") or {},
+        "stage_timings": status.get("stage_timings") or {},
+        "chunks": len(read_json(job / "chunks.json", default=[]) or []),
+        "gaps": read_json(job / "gaps.json", default=[]) or [],
+        "segments": read_json(job / "segments.json", default=[]) or [],
+        "narration": read_json(job / "narration.json", default=[]) or [],
+        "video": f"/jobs/{job_id}/output.mp4" if (job / "output.mp4").is_file() else None,
+        "log": LOGS.get(job_id, [])[-14:],
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
@@ -116,7 +190,25 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
-        name = self.path.split("?")[0].lstrip("/") or "index.html"
+        path = self.path.split("?")[0]
+
+        if path.startswith("/api/job/"):
+            state = job_state(path[len("/api/job/"):])
+            self._send_json(200 if state else 404, state or {"error": "no such job"})
+            return
+
+        # Rendered videos live outside WEB_ROOT, under runs/dev/<id>/.
+        if path.startswith("/jobs/"):
+            parts = path[len("/jobs/"):].split("/")
+            if len(parts) == 2 and JOB_ID.match(parts[0]) and parts[1] == "output.mp4":
+                video = (get_profile("dev").jobs_root / parts[0] / "output.mp4").resolve()
+                if video.is_file():
+                    self._send(200, video.read_bytes(), "video/mp4")
+                    return
+            self._send(404, b"not found", "text/plain")
+            return
+
+        name = path.lstrip("/") or "index.html"
         target = (WEB_ROOT / name).resolve()
         if not target.is_relative_to(WEB_ROOT) or not target.is_file():
             self._send(404, b"not found", "text/plain")
@@ -127,17 +219,36 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, target.read_bytes(), types.get(target.suffix, "application/octet-stream"))
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/hear":
-            self._send_json(404, {"error": "unknown endpoint"})
-            return
+        path = self.path.split("?")[0]
         length = int(self.headers.get("Content-Length") or 0)
-        if not 0 < length <= MAX_BODY:
-            self._send_json(413, {"error": "bad audio size"})
+
+        if path == "/api/hear":
+            if not 0 < length <= MAX_AUDIO:
+                self._send_json(413, {"error": "bad audio size"})
+                return
+            try:
+                self._send_json(200, hear(self.rfile.read(length)))
+            except Exception as exc:  # surface the reason; the UI reads .error
+                self._send_json(502, {"error": str(exc)})
             return
-        try:
-            self._send_json(200, hear(self.rfile.read(length)))
-        except Exception as exc:  # surface the reason; the UI reads .error
-            self._send_json(502, {"error": str(exc)})
+
+        if path == "/api/describe":
+            if not 0 < length <= MAX_VIDEO:
+                self._send_json(413, {"error": "video too large — trim it to 29s"})
+                return
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                job_id = start_job(
+                    self.rfile.read(length),
+                    query.get("name", ["clip.mp4"])[0],
+                    query.get("language", ["auto"])[0],
+                )
+                self._send_json(200, {"job": job_id})
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+            return
+
+        self._send_json(404, {"error": "unknown endpoint"})
 
     def log_message(self, fmt: str, *args) -> None:
         print(f"  {self.command} {self.path} -> {args[1] if len(args) > 1 else ''}",

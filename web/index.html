@@ -192,6 +192,58 @@
     overflow-x: auto; white-space: pre;
   }
 
+  /* ---- results ------------------------------------------------------- */
+  #result[hidden] { display: none; }
+  #result { margin-top: 3rem; }
+  .result-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem;
+  }
+  .result-head h2 { font-size: 1.4rem; }
+  .result-head .meta { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+
+  .bar { height: 8px; background: var(--well); border-radius: 99px; overflow: hidden; border: 1px solid var(--line); }
+  .bar span { display: block; height: 100%; background: var(--accent); width: 0; }
+  @media (prefers-reduced-motion: no-preference) { .bar span { transition: width .4s ease; } }
+  .bar-label { margin-top: .7rem; font-size: .9rem; color: var(--accent); }
+
+  video {
+    width: 100%; border-radius: 12px; border: 1px solid var(--line);
+    background: #000; display: block;
+  }
+
+  /* Transparency: one card per narration window, showing the evidence. */
+  .windows { list-style: none; padding: 0; margin: 1.5rem 0 0;
+             display: flex; flex-direction: column; gap: .9rem; }
+  .window {
+    background: var(--well); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+    padding: 1.1rem 1.2rem;
+  }
+  .window .when {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .75rem; color: var(--accent); font-variant-numeric: tabular-nums;
+    letter-spacing: .04em;
+  }
+  .window .said { margin-top: .55rem; font-size: 1.05rem; }
+  .window .why { margin-top: .6rem; color: var(--muted); font-size: .78rem; }
+  .window .beats { margin: .7rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .78rem; }
+  .window .beats li { margin-top: .25rem; }
+
+  .facts { list-style: none; padding: 0; margin: 1.5rem 0 0;
+           display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .8rem; }
+  .fact { background: var(--well); border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1rem; }
+  .fact b { display: block; font-size: 1.5rem; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .fact span { font-size: .72rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+
+  .log {
+    margin-top: 1.2rem; padding: .9rem 1rem; background: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .7rem; color: var(--muted); white-space: pre-wrap;
+    max-height: 12rem; overflow-y: auto;
+  }
+
   .how { margin-top: 4rem; border-top: 1px solid var(--line); padding-top: 2.5rem; }
   .how h2 { font-size: 1.05rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
   .how ol { margin: 1.2rem 0 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: .8rem; }
@@ -295,6 +347,19 @@
       </ol>
     </form>
 
+    <section id="result" hidden aria-labelledby="result-title">
+      <div class="result-head">
+        <h2 id="result-title">Your described video</h2>
+        <p class="meta" id="result-meta"></p>
+      </div>
+      <div class="bar" role="presentation"><span id="bar-fill"></span></div>
+      <p class="bar-label" id="bar-label" role="status"></p>
+      <video id="player" controls preload="metadata" hidden></video>
+      <ul class="facts" id="facts"></ul>
+      <ul class="windows" id="windows"></ul>
+      <pre class="log" id="log" hidden aria-label="Pipeline log"></pre>
+    </section>
+
     <section class="how" aria-labelledby="how-title">
       <h2 id="how-title">How it works</h2>
       <ol>
@@ -335,8 +400,118 @@
     }
   });
 
-  // The processing backend isn't wired to this page yet — say so honestly and
-  // hand over the exact command, rather than pretending to work.
+  // ------------------------------------------------------------------
+  // Run the real pipeline. The server starts it as a subprocess and the
+  // runner already writes stage/pct into status.json, so progress is read,
+  // never guessed. Poll until the stage reads "done" or an error appears.
+  // ------------------------------------------------------------------
+  const result = document.getElementById("result");
+  const barFill = document.getElementById("bar-fill");
+  const barLabel = document.getElementById("bar-label");
+  const player = document.getElementById("player");
+  const facts = document.getElementById("facts");
+  const windows = document.getElementById("windows");
+  const logBox = document.getElementById("log");
+  const resultMeta = document.getElementById("result-meta");
+
+  const STAGE_WORDS = {
+    queued: "Queued", validate: "Checking the video", gaps: "Listening for dialogue-free windows",
+    scenes: "Watching the frames", align: "Matching what's seen to where it's quiet",
+    narrate: "Writing the description", tts_fit: "Speaking it and fitting it to the gap",
+    mix: "Mixing it into your video", done: "Done",
+  };
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function render(state) {
+    barFill.style.width = state.pct + "%";
+    const word = STAGE_WORDS[state.stage] || state.stage;
+    barLabel.textContent = state.error
+      ? "Stopped: " + state.error
+      : word + (state.stage === "done" ? "" : "…") + "  " + state.pct + "%";
+
+    const bits = [];
+    if (state.output_language) bits.push("narrating in " + state.output_language);
+    if (state.source_language) {
+      bits.push("heard " + state.source_language +
+                (state.language_confidence != null
+                  ? " (confidence " + state.language_confidence.toFixed(2) + ")" : ""));
+    }
+    resultMeta.textContent = bits.join(" · ");
+
+    if (state.video && player.getAttribute("src") !== state.video) {
+      player.src = state.video;
+      player.hidden = false;
+    }
+
+    // Facts: the numbers that show this was measured, not guessed.
+    facts.replaceChildren();
+    if (state.chunks) {
+      const spoken = state.gaps.length;
+      const cards = [
+        [state.chunks, "chunks heard"],
+        [spoken, spoken === 1 ? "quiet window" : "quiet windows"],
+        [state.segments.length, "narrated"],
+      ];
+      const calls = state.api.calls || {};
+      const total = Object.values(calls).reduce((a, b) => a + b, 0);
+      if (total) cards.push([total, "api calls"]);
+      for (const [value, label] of cards) {
+        const card = el("li", "fact");
+        card.append(el("b", null, String(value)), el("span", null, label));
+        facts.append(card);
+      }
+    }
+
+    // One card per window: what was said, and the evidence behind it.
+    windows.replaceChildren();
+    const spokenById = {};
+    for (const line of state.narration) spokenById[line.gap_index] = line;
+    for (const segment of state.segments) {
+      const line = spokenById[segment.gap_index];
+      const card = el("li", "window");
+      card.append(el("p", "when",
+        segment.start.toFixed(2) + "s – " + segment.end.toFixed(2) + "s" +
+        "   ·   room for " + segment.max_duration.toFixed(2) + "s" +
+        (line && line.wav_duration ? "   ·   spoke " + line.wav_duration.toFixed(2) + "s" : "")));
+      card.append(el("p", "said", line ? "“" + line.text + "”" : "not narrated yet"));
+      card.append(el("p", "why", segment.reason +
+        "   ·   budget " + segment.char_budget + " characters" +
+        (line ? ", used " + line.text.length : "")));
+      const beats = el("ul", "beats");
+      for (const beat of segment.beats) {
+        beats.append(el("li", null, "[" + beat.when + "] " + beat.event));
+      }
+      card.append(beats);
+      windows.append(card);
+    }
+
+    if (state.log && state.log.length) {
+      logBox.textContent = state.log.join("\n");
+      logBox.hidden = false;
+    }
+  }
+
+  function poll(jobId) {
+    fetch("/api/job/" + jobId).then((r) => r.json()).then((state) => {
+      if (state.error && !state.stage) { barLabel.textContent = state.error; return; }
+      render(state);
+      if (state.stage === "done") {
+        status.textContent = "Done — your described video is below.";
+        speak("Your described video is ready. " + state.segments.length +
+              " description" + (state.segments.length === 1 ? "" : "s") + " added.");
+        return;
+      }
+      if (state.error) { status.textContent = "The run stopped. See the log below."; return; }
+      setTimeout(() => poll(jobId), 1200);
+    }).catch(() => { barLabel.textContent = "Lost contact with the server."; });
+  }
+
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!clip.files.length) {
@@ -344,13 +519,29 @@
       clip.focus();
       return;
     }
-    const lang = language.value;
-    const langFlag = lang === "auto" ? "" : " --language " + lang;
-    status.innerHTML =
-      "Processing from this page is coming. For now, a teammate runs:" +
-      "<code></code>";
-    status.querySelector("code").textContent =
-      "python3 -m drishti.pipeline --clip " + clip.files[0].name + langFlag + " --profile demo";
+    const file = clip.files[0];
+    status.textContent = "Uploading " + file.name + "…";
+    result.hidden = false;
+    player.hidden = true; player.removeAttribute("src");
+    facts.replaceChildren(); windows.replaceChildren();
+    logBox.hidden = true;
+    barFill.style.width = "0%";
+    barLabel.textContent = "Uploading…";
+
+    const query = "?name=" + encodeURIComponent(file.name) +
+                  "&language=" + encodeURIComponent(language.value);
+    fetch("/api/describe" + query, { method: "POST", body: file })
+      .then((r) => r.json())
+      .then((started) => {
+        if (!started.job) throw new Error(started.error || "could not start");
+        status.textContent = "Running — progress is below.";
+        poll(started.job);
+      })
+      .catch((err) => {
+        status.textContent = "Could not start: " + err.message +
+          ". Is the DRISHTI server running? Use “make web”.";
+        barLabel.textContent = "";
+      });
   });
 
   // ------------------------------------------------------------------
