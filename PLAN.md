@@ -55,6 +55,29 @@ early and shift to reliability/features later; Tanishq is pipeline-heavy early
 (narrate+speak have complete reference code) and demo-heavy late; Aryan is
 steady integration all day.
 
+### Aryan's idle-time backlog (integration has wait states — fill them in this order)
+
+1. **Caching decorator in `common.py`** (before the 10:30 freeze): disk-cache
+   POST responses keyed by payload hash. Gives 30B and TTS the same
+   free-rerun property Saaras chunks already have — critical for credits and
+   for a snappy re-demo in front of judges.
+2. **Transparency panel** (Increment 1): per-stage latency, API-call counts,
+   and gap/beat counts read from `status.json`, shown as a small panel in the
+   UI. When a judge probes "does this actually work?", we show the pipeline's
+   receipts — this is what L4 "survives realistic challenge" looks like. Also
+   produces the real number behind the "~2 minutes per clip" demo claim.
+3. **Accessible UI pass** (Increment 1–2): keyboard-navigable player, aria
+   labels, visible focus states, high contrast. An accessibility product
+   whose own UI is screen-reader-friendly is a Delight point judges notice —
+   and it's ~30 minutes of work in the shell Aryan already owns.
+4. **Radio mode** (Increment 3): one-click MP3 export of the described mix
+   (`ffmpeg -vn` + mp3 encode on `output.mp4`, done in the API layer — no
+   touching Nishant's files) served as an artifact. Blind users often just
+   listen; "watch it, or listen to it like a podcast" is a one-line demo beat.
+5. **QR hand-off** (only if everything is green): serve `output.mp4` on LAN +
+   a QR code so judges play the result on their own phone with their own
+   earphones. Venue-Wi-Fi dependent — attempt quietly, never promise it.
+
 ---
 
 ## 2. Zero-Merge-Conflict Working Agreement (the answer to last time)
@@ -308,10 +331,16 @@ passes — that module lands during Increment 1 instead. Nobody waits on anybody
 
 ### Increment 1 — Web product (12:30–13:45)
 - Aryan: FastAPI job flow live (upload → background thread → per-stage
-  status → artifacts) + React shell wired to it.
+  status → artifacts) + React shell wired to it. Then from the backlog:
+  **transparency panel** (per-stage latency + API-call counts from
+  `status.json`) and the first **accessible-UI pass** (keyboard-navigable
+  player, aria labels, focus states).
 - Tanishq: presentational components — **evidence timeline** (audio bar:
   dialogue red, narration-safe windows green, scene beats beneath, narration
-  card), result `Player` with **Original ⇄ Described toggle**.
+  card), result `Player` with **Original ⇄ Described toggle**. The narration
+  card also shows **"withheld details"** — the `uncertain_details` the system
+  refused to narrate. Honesty on display beats confident hallucination, and
+  the data is already in `scenes.json`.
 - Nishant: clips B and C through his standalone modules; tune padding; fix
   what breaks.
 - Ritika: scene quality on clips B and C; prompt tweaks for fast action
@@ -341,7 +370,10 @@ any line not fully inside a detected gap).
   clips, zero manual recovery) + per-stage latency log (the "~2 minutes"
   claim needs a real number).
 - Aryan: optional explicit translation override in the shell; `"auto"`
-  remains the default and keeps source and output language matched.
+  remains the default and keeps source and output language matched. Then from
+  the backlog: **radio mode** — one-click MP3 export of the described mix
+  (done in the API layer, no touching `mix.py`), surfaced as a download
+  button next to the player.
 
 **Check (15:15): full product. Tanishq records the POLISHED fallback video
 and verifies playback + volume on the demo laptop.**
@@ -360,6 +392,17 @@ name-drop that to judges.
 - Ships only if it passes the same gate checklist. Demo moment: video freezes
   as the boardroom door opens, Bulbul explains who is waiting inside, video
   resumes. Judges remember this.
+- **Free variant with the same renderer:** a **scene-setting intro** at t=0 —
+  professional AD productions open with a spoken intro describing setting and
+  main characters before the action starts. Same freeze-frame mechanic on the
+  first frame, so if the pause renderer works, the intro is ~15 minutes extra
+  and gives every clip a polished opening.
+
+### Considered and rejected — do not reopen mid-event
+Voice cloning (consent/risk, low rubric value) · WhatsApp/Twilio delivery
+(integration time sink) · realtime description (explicit non-goal) · long
+videos (Saaras 29.5s REST limit; batch STT is post-hackathon). If someone
+proposes one of these after 1 PM, the answer is the cut list, not more scope.
 
 ### Submission lockdown — 16:00–16:30 (all four, non-negotiable)
 Finalize `IDEA_SCOPE.md` (problem, user, job, outcome + prior-work flag) ·
@@ -413,7 +456,7 @@ three-clip verification, rehearsal.
 
 ---
 
-## 10. Tonight (prep only — NO code, per the rules)
+## 10. Pre-build checklist (event has started — fold anything unfinished into M0)
 
 1. Rotate the Sarvam API key; confirm the OpenAI key exists and has credit.
 2. All four read `HANDOFF.md`, `drishti_e2e.py`, and this plan; confirm the
