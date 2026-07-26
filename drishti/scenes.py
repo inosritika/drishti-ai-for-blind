@@ -5,7 +5,8 @@ Create factual scene beats across the full video timeline.
 The downstream contract is deliberately small and frozen:
 
     scenes.json
-      {"summary": str,
+      {"summary": str, "tone": str,
+       "entity_details": {entity_id: description},
        "beats": [{"start": float, "end": float, "event": str,
                   "entities": [str], "intensity": int,
                   "confidence": float, "uncertain_details": [str]}]}
@@ -26,6 +27,7 @@ import base64
 import json
 import math
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -67,11 +69,14 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "intensity_max": 5,
     "confidence_min": 0.0,
     "confidence_max": 1.0,
+    "tone_max_words": 4,
+    "max_entity_details": 20,
+    "entity_description_max_words": 18,
     "timestamp_tolerance_seconds": 0.20,
     "require_evidence": True,
     "max_output_tokens": 6000,
     "reasoning_effort": "low",
-    "prompt_version": "scene-beats-v1",
+    "prompt_version": "scene-beats-v4",
 }
 
 ENV_PARAMS: dict[str, str] = {
@@ -93,6 +98,9 @@ ENV_PARAMS: dict[str, str] = {
     "intensity_max": "DRISHTI_SCENES_INTENSITY_MAX",
     "confidence_min": "DRISHTI_SCENES_CONFIDENCE_MIN",
     "confidence_max": "DRISHTI_SCENES_CONFIDENCE_MAX",
+    "tone_max_words": "DRISHTI_SCENES_TONE_MAX_WORDS",
+    "max_entity_details": "DRISHTI_SCENES_MAX_ENTITY_DETAILS",
+    "entity_description_max_words": "DRISHTI_SCENES_ENTITY_DESCRIPTION_MAX_WORDS",
     "timestamp_tolerance_seconds": "DRISHTI_SCENES_TIMESTAMP_TOLERANCE_SECONDS",
     "require_evidence": "DRISHTI_SCENES_REQUIRE_EVIDENCE",
     "max_output_tokens": "DRISHTI_SCENES_MAX_OUTPUT_TOKENS",
@@ -109,6 +117,9 @@ INT_PARAMS = {
     "max_refinement_windows",
     "intensity_min",
     "intensity_max",
+    "tone_max_words",
+    "max_entity_details",
+    "entity_description_max_words",
     "max_output_tokens",
 }
 FLOAT_PARAMS = {
@@ -131,6 +142,8 @@ CANONICAL_BEAT_KEYS = (
     "confidence",
     "uncertain_details",
 )
+
+ENTITY_ID_RE = re.compile(r"[a-z][a-z0-9_]*[0-9]")
 
 
 def _coerce_bool(value: Any, name: str) -> bool:
@@ -206,6 +219,9 @@ def _validate_params(params: dict[str, Any]) -> None:
         "min_beat_seconds",
         "max_beat_seconds",
         "max_output_tokens",
+        "tone_max_words",
+        "max_entity_details",
+        "entity_description_max_words",
     )
     for name in positive:
         if params[name] <= 0:
@@ -333,9 +349,29 @@ def _analysis_schema(
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["summary", "beats"],
+        "required": ["summary", "tone", "entity_details", "beats"],
         "properties": {
             "summary": {"type": "string"},
+            "tone": {"type": "string"},
+            # Strict Structured Outputs cannot express arbitrary object keys
+            # safely. The model returns rows; _canonical converts them to the
+            # requested {"woman1": "description"} map in scenes.json.
+            "entity_details": {
+                "type": "array",
+                "maxItems": params["max_entity_details"],
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["id", "description"],
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "pattern": r"^[a-z][a-z0-9_]*[0-9]$",
+                        },
+                        "description": {"type": "string"},
+                    },
+                },
+            },
             "beats": {
                 "type": "array",
                 "minItems": 1,
@@ -351,12 +387,18 @@ def _prompt(
     end: float,
     *,
     refinement: bool,
+    known_entity_details: dict[str, str] | None = None,
 ) -> str:
     purpose = (
         "This is a targeted second look at a beat that may contain multiple "
         "visible changes."
         if refinement
         else "Build scene beats across the complete supplied timeline."
+    )
+    known_entities = (
+        json.dumps(known_entity_details, ensure_ascii=False)
+        if known_entity_details
+        else "(none — create stable IDs for visually distinct people or characters)"
     )
     return f"""You are the visual evidence stage of an audio-description system.
 {purpose}
@@ -365,6 +407,27 @@ Analyze only the timestamp-labelled frames from {start:.3f}s through {end:.3f}s.
 Return factual, language-neutral visual scene beats covering that whole interval.
 
 Rules:
+- tone describes the overall visible mood in at most
+  {params['tone_max_words']} words, such as "tense and suspenseful", "funny",
+  "relaxing", or "somber". Return a short label, never a sentence or explanation.
+- entity_details identifies visually distinct people or character-like figures.
+  Give each one a stable lowercase ID ending in a number, with no spaces, such
+  as woman1, woman2, man1, child1, or shadow1. Reuse a known ID only when the
+  visible appearance matches that known description; otherwise create a new ID.
+  Descriptions must contain only visible appearance and clothing, use at most
+  {params['entity_description_max_words']} words, and never infer a name,
+  relationship, personality, or inner emotion. Prefer visible evidence such as
+  "wide eyes and tense expression" over "is frightened".
+- Return at most {params['max_entity_details']} entity_details. Use these IDs in
+  each beat's entities list for people and character-like figures; ordinary
+  objects and settings may remain descriptive strings. Return a detail row for
+  every ID used in this response, including reused known IDs, and do not return
+  detail rows for entities absent from the supplied frames. Across known and
+  newly created IDs, do not exceed {params['max_entity_details']} total IDs.
+- Entity IDs are machine references for the entities lists only. Write summary
+  and event text in natural language such as "the woman walks"; never write
+  identifiers such as woman1 or shadow1 inside summary or event text.
+- Known full-video entity IDs for this analysis: {known_entities}
 - Start the first beat at {start:.3f} and end the final beat at {end:.3f}.
 - Keep beats chronological and contiguous, with no gaps or overlaps.
 - Start a new beat when the visible action, setting, subject, or shot context changes.
@@ -441,6 +504,7 @@ def _call_openai(
     end: float,
     *,
     refinement: bool,
+    known_entity_details: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": params["model"],
@@ -449,7 +513,13 @@ def _call_openai(
                 "role": "user",
                 "content": _request_content(
                     frames,
-                    _prompt(params, start, end, refinement=refinement),
+                    _prompt(
+                        params,
+                        start,
+                        end,
+                        refinement=refinement,
+                        known_entity_details=known_entity_details,
+                    ),
                     params["image_detail"],
                 ),
             }
@@ -512,6 +582,47 @@ def normalize_analysis(
     summary = analysis.get("summary")
     if not isinstance(summary, str) or not summary.strip():
         raise ValueError("scene summary must be a non-empty string")
+    tone = analysis.get("tone")
+    if not isinstance(tone, str) or not tone.strip():
+        raise ValueError("scene tone must be a non-empty string")
+    tone = " ".join(tone.strip().split())
+    if len(tone.split()) > params["tone_max_words"]:
+        raise ValueError(
+            f"scene tone has {len(tone.split())} words; maximum is "
+            f"{params['tone_max_words']}"
+        )
+    entity_rows = analysis.get("entity_details")
+    if not isinstance(entity_rows, list):
+        raise ValueError("scene entity_details must be a list in model output")
+    if len(entity_rows) > params["max_entity_details"]:
+        raise ValueError(
+            f"scene has {len(entity_rows)} entity details; maximum is "
+            f"{params['max_entity_details']}"
+        )
+    entity_details: dict[str, str] = {}
+    for index, row in enumerate(entity_rows):
+        label = f"entity_details[{index}]"
+        if not isinstance(row, dict):
+            raise ValueError(f"{label} must be an object")
+        entity_id = row.get("id")
+        description = row.get("description")
+        if not isinstance(entity_id, str) or not ENTITY_ID_RE.fullmatch(entity_id):
+            raise ValueError(
+                f"{label}.id must be lowercase, start with a letter, end in "
+                "a number, and contain no spaces"
+            )
+        if entity_id in entity_details:
+            raise ValueError(f"duplicate entity id {entity_id!r}")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError(f"{label}.description must be a non-empty string")
+        description = " ".join(description.strip().split())
+        description_words = len(description.split())
+        if description_words > params["entity_description_max_words"]:
+            raise ValueError(
+                f"{label}.description has {description_words} words; maximum is "
+                f"{params['entity_description_max_words']}"
+            )
+        entity_details[entity_id] = description
     source_beats = analysis.get("beats")
     if not isinstance(source_beats, list) or not source_beats:
         raise ValueError("scene analysis must contain at least one beat")
@@ -625,7 +736,60 @@ def normalize_analysis(
             }
         )
 
-    return {"summary": summary.strip(), "beats": normalized}
+    referenced_ids = {
+        entity
+        for beat in normalized
+        for entity in beat["entities"]
+        if ENTITY_ID_RE.fullmatch(entity)
+    }
+    missing_details = sorted(referenced_ids - set(entity_details))
+    if missing_details:
+        raise ValueError(
+            "entity IDs used in beats have no entity_details row: "
+            + ", ".join(missing_details)
+        )
+    unused_details = sorted(set(entity_details) - referenced_ids)
+    if unused_details:
+        raise ValueError(
+            "entity_details rows are not referenced by any beat: "
+            + ", ".join(unused_details)
+        )
+
+    return {
+        "summary": summary.strip(),
+        "tone": tone,
+        "entity_details": entity_details,
+        "beats": normalized,
+    }
+
+
+def _reconcile_entity_details(
+    normalized: dict[str, Any],
+    params: dict[str, Any],
+) -> None:
+    """Keep the full-video entity map consistent after beat refinement."""
+    referenced_ids = {
+        entity
+        for beat in normalized["beats"]
+        for entity in beat["entities"]
+        if ENTITY_ID_RE.fullmatch(entity)
+    }
+    missing_details = sorted(referenced_ids - set(normalized["entity_details"]))
+    if missing_details:
+        raise ValueError(
+            "final beats reference entity IDs without descriptions: "
+            + ", ".join(missing_details)
+        )
+    normalized["entity_details"] = {
+        entity_id: description
+        for entity_id, description in normalized["entity_details"].items()
+        if entity_id in referenced_ids
+    }
+    if len(normalized["entity_details"]) > params["max_entity_details"]:
+        raise ValueError(
+            f"final scene has {len(normalized['entity_details'])} entity details; "
+            f"maximum is {params['max_entity_details']}"
+        )
 
 
 def _refinement_candidates(
@@ -660,6 +824,8 @@ def _relative_frame(frame: dict[str, Any], job: Path) -> dict[str, Any]:
 def _canonical(normalized: dict[str, Any]) -> dict[str, Any]:
     return {
         "summary": normalized["summary"],
+        "tone": normalized["tone"],
+        "entity_details": normalized["entity_details"],
         "beats": [
             {key: beat[key] for key in CANONICAL_BEAT_KEYS}
             for beat in normalized["beats"]
@@ -804,6 +970,7 @@ def understand(job: Path, cfg: dict[str, Any]) -> None:
                     window_start,
                     window_end,
                     refinement=True,
+                    known_entity_details=dict(normalized["entity_details"]),
                 )
                 refined = normalize_analysis(
                     refined_raw,
@@ -816,9 +983,13 @@ def understand(job: Path, cfg: dict[str, Any]) -> None:
                     f"  scenes: refined beat {candidate_index} into "
                     f"{len(refined['beats'])} beat(s)"
                 )
+                for entity_id, description in refined["entity_details"].items():
+                    normalized["entity_details"].setdefault(entity_id, description)
                 normalized["beats"][candidate_index : candidate_index + 1] = refined[
                     "beats"
                 ]
+
+    _reconcile_entity_details(normalized, params)
 
     # A long beat after targeted review can be legitimate continuous action.
     # Record it visibly rather than mechanically inventing scene boundaries.

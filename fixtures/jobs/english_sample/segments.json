@@ -28,7 +28,7 @@
         "end": 6.5,
         "event": "Men in suits get out of the cars and gather near the entrance.",
         "entities": [
-          "men in suits",
+          "group1",
           "cars",
           "entrance"
         ],
@@ -59,7 +59,7 @@
         "end": 13.5,
         "event": "The men enter a modern boardroom with a long table.",
         "entities": [
-          "men in suits",
+          "group1",
           "boardroom",
           "table"
         ],
