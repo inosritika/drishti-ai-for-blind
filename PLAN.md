@@ -45,10 +45,10 @@ each other's files and communicate ONLY through JSON files in a job directory.
 
 | Person | Vertical | Owns (nobody else ever edits these) |
 |---|---|---|
-| **Nishant** | **Listening** — everything audio-in and audio-out | `drishti/media.py`, `drishti/gaps.py`, `drishti/mix.py` |
+| **Nishant** | **Listening** — everything audio-in and audio-out, including source-language detection | `drishti/media.py`, `drishti/gaps.py`, `drishti/mix.py` |
 | **Ritika** | **Seeing** — everything visual understanding | `drishti/scenes.py`, `drishti/memory.py`, `demo/scene_fallbacks/` |
-| **Tanishq** | **Speaking** — everything language generation + the demo itself | `drishti/narrate.py`, `drishti/speak.py`, `web/src/components/`, `demo/` (clips, IDEA_SCOPE.md, recordings, script) |
-| **Aryan** | **Integration** — the product that wraps the verticals | `drishti/pipeline.py`, `drishti/common.py`, `api/`, `web/` shell (`App.tsx`, `api.ts`, state), `fixtures/`, repo/Makefile/.env.example |
+| **Tanishq** | **Speaking** — narration/TTS in the resolved source language + the demo itself | `drishti/narrate.py`, `drishti/speak.py`, `web/src/components/`, `demo/` (clips, IDEA_SCOPE.md, recordings, script) |
+| **Aryan** | **Integration** — language resolution and the product that wraps the verticals | `drishti/pipeline.py`, `drishti/common.py`, `api/`, `web/` shell (`App.tsx`, `api.ts`, state), `fixtures/`, repo/Makefile/.env.example |
 
 Workloads are balanced across the day: Nishant and Ritika are pipeline-heavy
 early and shift to reliability/features later; Tanishq is pipeline-heavy early
@@ -101,22 +101,71 @@ steady integration all day.
 ```
 jobs/<id>/
   input.mp4
-  status.json      # {stage, pct, error?, awaiting_approval?}   (Aryan writes)
+  status.json      # {stage, pct, source_language,              (Aryan writes)
+                   #  language_confidence, output_language,
+                   #  awaiting_language_selection?, error?}
   gaps.json        # [{start, end, duration}]                   (Nishant writes)
   chunks.json      # raw Saaras chunk cache                     (Nishant writes)
   transcript.txt   # assembled dialogue transcript              (Nishant writes)
+  language.json    # {source_language, confidence, evidence}     (Nishant writes)
   scenes.json      # scene beats                                (Ritika writes)
-  narration.json   # [{gap_index, start, end, max_duration,
+  narration.json   # [{gap_index, start, end, max_duration, language,
                    #   text, wav, wav_duration, pace}]          (Tanishq writes)
   narration_XX.wav #                                            (Tanishq writes)
   output.mp4       #                                            (Nishant writes)
 ```
 
-**API contract** (fixed at 10:15): `POST /jobs` (video + `{language}`) →
-`{job_id}` · `GET /jobs/{id}` → status + artifact links ·
+**API contract** (fixed at 10:15): `POST /jobs` (video +
+`{language: "auto"}` by default) → `{job_id}` · `GET /jobs/{id}` → status,
+`source_language`, `language_confidence`, `output_language`, and artifact links ·
 `POST /jobs/{id}/narration/{n}` `{text}` (approve/edit) ·
 `GET /jobs/{id}/artifacts/...` · stage names fixed:
 `validate → gaps → scenes → transcript → narrate → tts_fit → mix → done`.
+
+### Source-language matching — Milestone 1 invariant
+
+DRISHTI describes a video in the language spoken in that video unless the user
+explicitly requests translation. An English video must produce English
+narration and English speech; a Hindi video must produce Devanagari Hindi
+narration and Hindi speech. The pipeline must never silently default an
+English video to Hindi.
+
+**Frozen routing contract:**
+
+1. **Nishant detects the source language in `gaps.py`.** Saaras chunk calls
+   continue to use `language_code=unknown`. For every non-empty speech chunk,
+   retain Saaras's `language_code` and `language_probability` in
+   `chunks.json`. Choose the dominant language across spoken chunks, weighted
+   by chunk duration, and write it to `language.json`. If the clip has no
+   speech, fewer than two usable speech chunks, confidence below `0.70`, or no
+   clear dominant language, write `source_language: "unknown"` instead of
+   guessing.
+2. **Aryan resolves the output language in `pipeline.py`.** With the default
+   request `{language: "auto"}`, set `output_language = source_language`.
+   Normalize supported results to Sarvam codes (`en-IN`, `hi-IN`, `ta-IN`,
+   etc.), store the resolved values in `status.json`, and pass
+   `output_language` explicitly to every downstream stage. If the source is
+   unknown, mixed, or unsupported by Bulbul, pause with
+   `awaiting_language_selection: true`; never fall back to `hi-IN`.
+3. **Tanishq consumes, but never re-decides, the language.** `narrate.py`
+   receives `output_language` and tells the multilingual `sarvam-30b` model to
+   write in that language. `speak.py` passes the exact same language code to
+   Bulbul. Add output validation: Hindi must contain sufficient Devanagari;
+   English must be Latin-script English. A mismatch fails the stage before
+   audio is mixed.
+4. **Ritika keeps vision language-neutral.** `scenes.py` and reviewed scene
+   fallbacks describe only visible evidence in stable factual text. They do
+   not select the narration language; Sarvam-30B converts those facts into the
+   resolved output language.
+5. **Explicit translation is separate and optional.** A user may later choose
+   a supported language instead of `"auto"`, but this is an explicit override
+   shown in the UI. Automatic source-language matching is required for the
+   first working demo; the translation toggle is not.
+
+**Fixture contract:** Aryan commits both English and Hindi fixture jobs.
+Each contains `chunks.json`, `language.json`, and expected
+`output_language`. These fixtures let Nishant test detection, Tanishq test
+generation/TTS, and Aryan test routing without waiting for another module.
 
 ---
 
@@ -138,8 +187,9 @@ OpenAI, a sensor only). Our depth story is L4/L5 material:
   found the exact 0–13.5s dialogue-free region).
 - **Bulbul with a measure-and-fit loop** — synthesize, measure with ffprobe,
   re-pace, shorten, or skip. Narration provably never overlaps dialogue.
-- **Sarvam-30B writes narration natively in Devanagari/Tamil script**, with
-  script validation.
+- **Sarvam-30B writes narration natively in the detected source language** —
+  English for English video, Devanagari Hindi for Hindi video — with script
+  validation before TTS.
 
 ### Product parameter game plan
 
@@ -182,7 +232,7 @@ Every number below is battle-tested. Change nothing without a reason.
 | Module | Reference functions | Keep exactly |
 |---|---|---|
 | `media.py` | `media_duration`, `has_audio_stream`, `extract_audio` | Mono 16kHz WAV; `highpass=f=80,afftdn=nf=-25` denoise (room hiss only — never fights music); silent-track synthesis for no-audio videos |
-| `gaps.py` | `detect_gaps_with_saaras`, `detect_gaps`, `sarvam_stt` | `POST /speech-to-text`, `saaras:v3`, `language_code=unknown`; 1.5s chunks via `wave`; empty transcript = no speech; merge consecutive; **150ms edge padding**; cache to `chunks.json`; also writes `transcript.txt`. Keep energy `silencedetect` as secondary mode for quiet clips |
+| `gaps.py` | `detect_gaps_with_saaras`, `detect_gaps`, `sarvam_stt` | `POST /speech-to-text`, `saaras:v3`, `language_code=unknown`; 1.5s chunks via `wave`; empty transcript = no speech; merge consecutive; **150ms edge padding**; cache transcript + Saaras language/probability per spoken chunk to `chunks.json`; derive the dominant source language and write `language.json` as defined in §2; also writes `transcript.txt`. Keep energy `silencedetect` as secondary mode for quiet clips |
 | `mix.py` | `mux` | `adelay` per segment → `amix` → **`apad=whole_dur` + `atrim`** (the truncation-bug fix) → `asplit` → `sidechaincompress threshold=0.015:ratio=8:attack=10:release=250` → `amix duration=first`; video stream copied; aac 192k `+faststart`. Smoke-test on a synthetic tone before real narration |
 
 ### Ritika (Seeing)
@@ -194,15 +244,15 @@ Every number below is battle-tested. Change nothing without a reason.
 ### Tanishq (Speaking)
 | Module | Reference functions | Keep exactly |
 |---|---|---|
-| `narrate.py` | `generate_narrations`, `select_gap_candidates`, `sarvam_chat_text`, language-name map | `sarvam-30b`, temp 0.1, **`reasoning_effort: None`** (null returns content; "low" burns budget reasoning); **plain-text output** (JSON mode truncated twice on the real clip); "Hindi written in Devanagari" phrasing; beats filtered at confidence ≥ 0.55; `max_spoken_seconds = gap − 0.25`; markdown-fence stripping. **One narration per gap — invariant.** NEW: Devanagari/Tamil-ratio validator + loanword avoidance |
-| `speak.py` | `sarvam_tts`, `fit_tts_segments` | `POST /text-to-speech`, `bulbul:v3`, base pace 1.05, 24kHz wav, base64 `audios[0]`; fit loop: re-pace `min(1.5, pace × actual/max × 1.04)` → shorten to `len × max/actual × 0.82` chars → accept at ≤ max+0.08s else **skip** |
+| `narrate.py` | `generate_narrations`, `select_gap_candidates`, `sarvam_chat_text`, language-name map | Receives `output_language`; never defaults or hardcodes Hindi. `sarvam-30b`, temp 0.1, **`reasoning_effort: None`** (null returns content; "low" burns budget reasoning); **plain-text output** (JSON mode truncated twice on the real clip); explicit native-script instruction for the resolved language; beats filtered at confidence ≥ 0.55; `max_spoken_seconds = gap − 0.25`; markdown-fence stripping. **One narration per gap — invariant.** Validate Devanagari for Hindi, Latin-script English for English, and Tamil script for Tamil before TTS |
+| `speak.py` | `sarvam_tts`, `fit_tts_segments` | Receives the same `output_language` as `narrate.py` and passes it to `POST /text-to-speech`; `bulbul:v3`, compatible speaker for that language, base pace 1.05, 24kHz wav, base64 `audios[0]`; fit loop: re-pace `min(1.5, pace × actual/max × 1.04)` → shorten to `len × max/actual × 0.82` chars → accept at ≤ max+0.08s else **skip** |
 
 ### Aryan (Integration)
 | Module | Reference functions | Notes |
 |---|---|---|
 | `common.py` | `http_json`, `http_multipart`, `run`, `require_binary`, `media_duration`, `write_json` | Written in M0, frozen at 10:30 |
-| `pipeline.py` | `main` flow + `--segments-json` reviewed mode | The reviewed-segments validator (refuses any human line not fully inside a detected gap) becomes the human-in-the-loop backend in Increment 2 — already designed |
-| `api/`, `web/` shell | — new | Background-thread job, `status.json` after every stage, artifact serving; React shell + API client vs fixtures |
+| `pipeline.py` | `main` flow + `--segments-json` reviewed mode | Implements §2 language resolution: default `--language auto`, reads `language.json`, passes one resolved language to narration and TTS, and pauses rather than guessing on unknown/mixed/unsupported input. The reviewed-segments validator (refuses any human line not fully inside a detected gap) becomes the human-in-the-loop backend in Increment 2 — already designed |
+| `api/`, `web/` shell | — new | Background-thread job, `status.json` after every stage, artifact serving; show detected and output language in job status; ask for language selection only when automatic detection cannot resolve it; React shell + API client vs fixtures |
 
 Constraints carried over: Saaras REST needs clips **< 29.5s** · never reuse a
 job dir for a different clip (stale chunk cache) · Bulbul supports fewer
@@ -215,7 +265,8 @@ promise Tamil on stage** · add response caching to 30B and TTS calls too
 ## 5. Milestone 0 — Setup, 10:00–10:30 (all four)
 
 Repo up with skeleton + module stubs (signatures from §4) · Aryan commits
-`common.py` and `fixtures/` (10:15 — contracts frozen) · `.env` with rotated
+`common.py` and English + Hindi fixture jobs, including the frozen
+`language.json` contract (10:15 — contracts frozen) · `.env` with rotated
 `SARVAM_API_KEY` + `OPENAI_API_KEY`, proven with one curl each · ffmpeg
 checked on all laptops · Tanishq starts trimming the shortlisted clips
 (< 29.5s each): **A** dialogue + continuous score with a ≥ 8s dialogue-free
@@ -235,16 +286,18 @@ unfinished):
 
 | Who | 10:30–12:15 | Definition of done |
 |---|---|---|
-| Nishant | `media.py` + `gaps.py`, then `mix.py` smoke test on a synthetic tone | Clip A gap windows printed AND audibly verified with headphones; chunk cache works; tone mux preserves duration |
-| Ritika | **Live OpenAI vision call at 10:30 sharp** (the one never-tested path — know by 11:00 if we need fallbacks), then harden `scenes.py`; write reviewed `scene_fallbacks/` JSON for all 3 clips | Factual, timestamp-valid beats for clip A from the real API — or reviewed fallback JSONs ready (vision is a sensor, not the scored capability) |
-| Tanishq | `narrate.py` + `speak.py` against `fixtures/jobs/` (real gaps/scenes from HANDOFF values) | One Devanagari-validated Hindi line per gap; fit loop lands WAV ≤ max_duration on clip-A-shaped fixtures |
-| Aryan | `pipeline.py` running all-fixtures by 11:00, then substitute real modules as they land; start `api/` | `python -m drishti jobs/clip_a --lang hi-IN` runs every stage with ≥ 3 real modules swapped in and writes `output.mp4` |
+| Nishant | `media.py` + `gaps.py`, including source-language detection, then `mix.py` smoke test on a synthetic tone | Clip A gap windows printed AND audibly verified with headphones; English input writes `en-IN`, Hindi input writes `hi-IN`, uncertain input writes `unknown`; chunk cache works; tone mux preserves duration |
+| Ritika | **Live OpenAI vision call at 10:30 sharp** (the one never-tested path — know by 11:00 if we need fallbacks), then harden `scenes.py`; write reviewed `scene_fallbacks/` JSON for all 3 clips | Factual, timestamp-valid, language-neutral beats for clip A from the real API — or reviewed fallback JSONs ready (vision is a sensor, not the scored capability) |
+| Tanishq | `narrate.py` + `speak.py` against English and Hindi `fixtures/jobs/` | English fixture produces English narration/TTS; Hindi fixture produces Devanagari Hindi narration/TTS; both pass script validation and the fit loop lands WAV ≤ max_duration |
+| Aryan | `pipeline.py` running all-fixtures by 11:00, then substitute real modules as they land; start `api/` | `python -m drishti jobs/clip_a --lang auto` resolves and records the source/output language, passes the same code to narration and TTS, runs every stage with ≥ 3 real modules swapped in, and writes `output.mp4` |
 
 **Gate 12:15–12:30 — all four stop and watch the output together** on the demo
 laptop, against the checklist: narration fully inside padded gap · zero
-dialogue overlap · real Devanagari · one narration per gap · source duration
-preserved · both streams present. Copy the MP4 to `demo/` — **fallback demo
-#1**, never touched again.
+dialogue overlap · detected source language equals output language in auto
+mode · English input produces English and Hindi input produces Devanagari
+Hindi · narration and TTS use the same language code · one narration per gap ·
+source duration preserved · both streams present. Copy the MP4 to `demo/` —
+**fallback demo #1**, never touched again.
 
 If a module is late, its fixture stays in the pipeline and the gate still
 passes — that module lands during Increment 1 instead. Nobody waits on anybody.
@@ -277,15 +330,18 @@ any line not fully inside a detected gap).
   hallucination safety net, and stage insurance — we never play a bad line to
   judges.
 
-### Increment 3 — Memory & Context + Tamil (14:30–15:15)
+### Increment 3 — Memory & Context + explicit Tamil translation (14:30–15:15)
 - Ritika: **entity memory** live — clip C part 1 → part 2, narration says
   "Rohan," not "a man in a grey suit." **A scored rubric parameter.**
-- Tanishq: Hindi ⇄ Tamil — native 30B Tamil vs Translate-then-TTS, pick
-  whichever sounds better, build only one; Tamil speaker verified in Bulbul.
+- Tanishq: optional explicit Hindi ⇄ Tamil translation override — native 30B
+  Tamil vs Translate-then-TTS, pick whichever sounds better, build only one;
+  Tamil speaker verified in Bulbul. This override never changes the default:
+  `"auto"` continues to narrate in the detected source language.
 - Nishant: three consecutive fresh-run successes (clean job dirs, all three
   clips, zero manual recovery) + per-stage latency log (the "~2 minutes"
   claim needs a real number).
-- Aryan: language toggle in the shell; keeps integration green.
+- Aryan: optional explicit translation override in the shell; `"auto"`
+  remains the default and keeps source and output language matched.
 
 **Check (15:15): full product. Tanishq records the POLISHED fallback video
 and verifies playback + volume on the demo laptop.**
@@ -347,6 +403,7 @@ three-clip verification, rehearsal.
 | A module runs late | Its fixture stays in the pipeline; the 12:30 gate passes anyway; module lands next increment |
 | OpenAI vision misbehaves (never live-tested) | Ritika tests 10:30 sharp; reviewed `scene_fallbacks/` per clip; vision is a sensor, not the scored capability |
 | Rate limits / venue Wi-Fi | Disk caching on every API call; all three clips processed + cached by 15:15; two fallback recordings |
+| English video receives Hindi narration | `language` defaults to `"auto"`; Nishant writes Saaras detection evidence, Aryan resolves and propagates one language code, and Tanishq validates the generated script before TTS; unknown/mixed input pauses for selection and never defaults to Hindi |
 | 30B outputs English/Hinglish or truncated JSON | Plain-text output + explicit script phrasing + script-ratio validator + approval step |
 | TTS overruns gap | Fit loop (pace → shorten → skip); clips chosen with ≥ 8s gaps |
 | Tamil speaker unsupported in Bulbul | Tanishq verifies in Increment 3 before we promise it on stage |
