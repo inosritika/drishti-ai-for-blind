@@ -14,12 +14,17 @@
   :root {
     --ink: #0e0f12;        /* page ground */
     --well: #16181d;       /* raised panels */
+    --well-2: #1b1e25;     /* panel hover / inner wells */
     --line: #2a2e37;       /* hairlines */
     --text: #f2efe6;       /* warm off-white, ~15.5:1 on ink */
     --muted: #a7aebc;      /* secondary, still 7:1 on ink */
     --accent: #ffb258;     /* warm amber — audio warmth, 9.6:1 on ink */
+    --accent-hi: #ffc677;  /* gradient top */
+    --accent-lo: #f79a35;  /* gradient bottom */
     --accent-ink: #241503; /* text on amber */
     --focus: #ffd9a8;
+    --ok: #8fe0ae;         /* completion ticks — semantic, not the accent */
+    --bad: #ff9d94;        /* errors, 8.4:1 on ink */
     --step: 3.5rem;        /* step-number column */
   }
 
@@ -40,6 +45,11 @@
     outline: 4px solid var(--focus);
     outline-offset: 3px;
     border-radius: 4px;
+  }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    clip-path: inset(50%); overflow: hidden; white-space: nowrap;
   }
 
   .skip {
@@ -96,11 +106,12 @@
   .step {
     background: var(--well);
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: 14px;
     padding: 1.5rem 1.5rem 1.6rem;
     display: grid;
     grid-template-columns: var(--step) 1fr;
     gap: 0 .5rem;
+    box-shadow: 0 1px 0 rgb(255 255 255 / .03) inset, 0 8px 24px rgb(0 0 0 / .25);
   }
   .step .num {
     color: var(--accent); font-weight: 700; font-size: 1.6rem;
@@ -116,15 +127,44 @@
     border-radius: 5px; padding: .1rem .45rem; margin-right: .35rem;
   }
 
-  /* Controls: minimum 48px hit targets, everywhere. */
+  /* ---- controls: minimum 48px hit targets, everywhere ----------------- */
+
+  /* The two amber commands share one physical vocabulary: lit from above,
+     lifting toward the hand on hover, pressing down on click. */
+  .file-label, .go {
+    background: linear-gradient(180deg, var(--accent-hi), var(--accent-lo));
+    color: var(--accent-ink);
+    border: none; cursor: pointer;
+    font: inherit; font-weight: 700;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / .38),
+                inset 0 -1px 0 rgb(0 0 0 / .18),
+                0 2px 4px rgb(0 0 0 / .45),
+                0 10px 26px rgb(247 154 53 / .18);
+  }
+  .file-label:hover, .go:hover {
+    filter: brightness(1.06);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / .38),
+                inset 0 -1px 0 rgb(0 0 0 / .18),
+                0 4px 8px rgb(0 0 0 / .45),
+                0 14px 32px rgb(247 154 53 / .26);
+  }
+  .file-label:active, .go:active {
+    filter: brightness(.97);
+    box-shadow: inset 0 2px 5px rgb(0 0 0 / .25), 0 1px 2px rgb(0 0 0 / .4);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .file-label, .go, .say { transition: transform .12s ease, box-shadow .12s ease, filter .12s ease, background-color .12s ease; }
+    .file-label:hover, .go:hover { transform: translateY(-1px); }
+    .file-label:active, .go:active { transform: translateY(1px); }
+  }
+
   .file-label {
     display: inline-flex; align-items: center; gap: .7rem;
-    background: var(--accent); color: var(--accent-ink);
-    font-weight: 700; font-size: 1rem;
-    padding: .85rem 1.5rem; border-radius: 10px;
-    cursor: pointer; min-height: 48px;
+    font-size: 1rem;
+    padding: .85rem 1.5rem; border-radius: 12px;
+    min-height: 48px;
   }
-  .file-label:hover { filter: brightness(1.07); }
+  .file-label svg { flex: none; }
   input[type="file"] {
     position: absolute; width: 1px; height: 1px;
     clip-path: inset(50%); overflow: hidden;
@@ -138,23 +178,14 @@
   .picked { margin-top: .8rem; font-size: .9rem; color: var(--muted); min-height: 1.4em; }
   .picked strong { color: var(--text); }
 
-  select {
+  select, input[type="text"] {
     width: 100%; max-width: 24rem; min-height: 48px;
     font: inherit; font-size: 1rem;
     color: var(--text); background: var(--ink);
-    border: 2px solid var(--line); border-radius: 10px;
+    border: 2px solid var(--line); border-radius: 12px;
     padding: .6rem .9rem;
   }
-  select:hover { border-color: var(--muted); }
-
-  input[type="text"] {
-    width: 100%; max-width: 24rem; min-height: 48px;
-    font: inherit; font-size: 1rem;
-    color: var(--text); background: var(--ink);
-    border: 2px solid var(--line); border-radius: 10px;
-    padding: .6rem .9rem;
-  }
-  input[type="text"]:hover { border-color: var(--muted); }
+  select:hover, input[type="text"]:hover { border-color: var(--muted); }
   input[type="text"]::placeholder { color: #6b7382; }
 
   .optional {
@@ -174,11 +205,15 @@
     min-height: 48px; padding: .8rem 1.4rem;
     font: inherit; font-size: 1rem; font-weight: 700;
     color: var(--accent); background: transparent;
-    border: 2px solid var(--accent); border-radius: 10px; cursor: pointer;
+    border: 2px solid var(--accent); border-radius: 12px; cursor: pointer;
   }
   .say:hover { background: rgb(255 178 88 / .12); }
   .say svg { flex: none; }
-  .say[data-live="1"] { color: var(--accent-ink); background: var(--accent); }
+  .say[data-live="1"] {
+    color: var(--accent-ink);
+    background: linear-gradient(180deg, var(--accent-hi), var(--accent-lo));
+    border-color: transparent;
+  }
   @media (prefers-reduced-motion: no-preference) {
     .say[data-live="1"] { animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 50% { box-shadow: 0 0 0 9px rgb(255 178 88 / .18); } }
@@ -188,27 +223,23 @@
 
   .go {
     width: 100%; min-height: 60px;
-    font: inherit; font-size: 1.15rem; font-weight: 700;
-    background: var(--accent); color: var(--accent-ink);
-    border: none; border-radius: 12px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: .7rem;
+    font-size: 1.15rem;
+    border-radius: 14px;
     padding: 1rem 1.5rem;
   }
-  .go:hover { filter: brightness(1.07); }
-  .go[aria-disabled="true"] { background: var(--well); color: var(--muted); cursor: not-allowed; }
+  .go svg { flex: none; }
+  .go[aria-disabled="true"] {
+    background: var(--well); color: var(--muted);
+    cursor: not-allowed; box-shadow: none; filter: none; transform: none;
+  }
 
   output.status {
     display: block; margin-top: 1rem; min-height: 1.5em;
     font-size: .95rem; color: var(--accent);
   }
-  output.status code {
-    display: block; margin-top: .6rem; padding: .8rem 1rem;
-    background: var(--ink); border: 1px solid var(--line); border-radius: 8px;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: .75rem; color: var(--text);
-    overflow-x: auto; white-space: pre;
-  }
 
-  /* ---- results ------------------------------------------------------- */
+  /* ---- the run: an honest, live account of the pipeline --------------- */
   #result[hidden] { display: none; }
   #result { margin-top: 3rem; }
   .result-head {
@@ -216,24 +247,111 @@
     gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem;
   }
   .result-head h2 { font-size: 1.4rem; }
+  .result-head h2:focus { outline: none; }
   .result-head .meta { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
 
-  .bar { height: 8px; background: var(--well); border-radius: 99px; overflow: hidden; border: 1px solid var(--line); }
-  .bar span { display: block; height: 100%; background: var(--accent); width: 0; }
-  @media (prefers-reduced-motion: no-preference) { .bar span { transition: width .4s ease; } }
-  .bar-label { margin-top: .7rem; font-size: .9rem; color: var(--accent); }
+  .run {
+    background: var(--well); border: 1px solid var(--line); border-radius: 14px;
+    padding: 1.3rem 1.4rem 1.1rem;
+    box-shadow: 0 1px 0 rgb(255 255 255 / .03) inset, 0 8px 24px rgb(0 0 0 / .25);
+  }
+  .run-top {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; margin-bottom: .8rem;
+  }
+  .run-stage { font-size: 1.1rem; font-weight: 700; }
+  .run-stage.is-error { color: var(--bad); }
+  .run-clock {
+    color: var(--muted); font-size: .85rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bar {
+    height: 10px; background: var(--ink); border-radius: 99px;
+    overflow: hidden; border: 1px solid var(--line);
+  }
+  .bar span {
+    display: block; height: 100%; width: 0; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent-lo), var(--accent-hi));
+    position: relative;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .bar span::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / .45) 50%, transparent 70%);
+      background-size: 200% 100%;
+      animation: sheen 1.8s linear infinite;
+    }
+    .run.is-done .bar span::after, .run.is-error .bar span::after { animation: none; content: none; }
+    @keyframes sheen { from { background-position: 200% 0; } to { background-position: -100% 0; } }
+  }
+  .run.is-error .bar span { background: var(--bad); }
+
+  /* Stage timeline: every step, ticked off with its measured time. */
+  .stages { list-style: none; margin: 1.1rem 0 0; padding: 0; }
+  .stages li {
+    display: grid; grid-template-columns: 1.5rem 1fr auto;
+    gap: 0 .8rem; align-items: center;
+    padding: .34rem 0; position: relative;
+    color: var(--muted); font-size: .9rem;
+  }
+  .stages li + li::before {  /* the connecting thread */
+    content: ""; position: absolute; left: calc(.75rem - 1px);
+    top: -0.55rem; height: .95rem; width: 2px; background: var(--line);
+  }
+  .stages .dot {
+    width: .95rem; height: .95rem; margin: 0 auto;
+    border-radius: 50%; border: 2px solid var(--line);
+    display: grid; place-items: center;
+  }
+  .stages .took {
+    color: var(--muted); font-size: .75rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .stages li[data-state="active"] { color: var(--text); font-weight: 700; }
+  .stages li[data-state="active"] .dot { border-color: var(--accent); background: var(--accent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .stages li[data-state="active"] .dot { animation: halo 1.4s ease-out infinite; }
+    @keyframes halo {
+      from { box-shadow: 0 0 0 0 rgb(255 178 88 / .5); }
+      to   { box-shadow: 0 0 0 9px rgb(255 178 88 / 0); }
+    }
+  }
+  .stages li[data-state="done"] { color: var(--text); }
+  .stages li[data-state="done"] .dot {
+    border-color: var(--ok); color: var(--ok);
+    font-size: .7rem; font-weight: 700; line-height: 1;
+  }
+  .stages li[data-state="done"] .dot::before { content: "✓"; }
+  .stages li[data-state="error"] { color: var(--bad); font-weight: 700; }
+  .stages li[data-state="error"] .dot {
+    border-color: var(--bad); color: var(--bad);
+    font-size: .7rem; font-weight: 700; line-height: 1;
+  }
+  .stages li[data-state="error"] .dot::before { content: "✕"; }
 
   video {
-    width: 100%; border-radius: 12px; border: 1px solid var(--line);
+    width: 100%; margin-top: 1.5rem; border-radius: 14px; border: 1px solid var(--line);
     background: #000; display: block;
+    box-shadow: 0 14px 40px rgb(0 0 0 / .45);
   }
+
+  .error-card {
+    margin-top: 1.5rem; padding: 1rem 1.2rem;
+    background: var(--well); border: 1px solid var(--line);
+    border-left: 4px solid var(--bad); border-radius: 10px;
+  }
+  .error-card h3 { color: var(--bad); font-size: 1rem; }
+  .error-card p { margin-top: .4rem; font-size: .9rem; white-space: pre-wrap; }
 
   /* Transparency: one card per narration window, showing the evidence. */
   .windows { list-style: none; padding: 0; margin: 1.5rem 0 0;
              display: flex; flex-direction: column; gap: .9rem; }
   .window {
     background: var(--well); border: 1px solid var(--line);
-    border-left: 3px solid var(--accent); border-radius: 10px;
+    border-left: 3px solid var(--accent); border-radius: 12px;
     padding: 1.1rem 1.2rem;
   }
   .window .when {
@@ -248,9 +366,20 @@
 
   .facts { list-style: none; padding: 0; margin: 1.5rem 0 0;
            display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .8rem; }
-  .fact { background: var(--well); border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1rem; }
+  .fact { background: var(--well); border: 1px solid var(--line); border-radius: 12px; padding: .9rem 1rem; }
   .fact b { display: block; font-size: 1.5rem; color: var(--accent); font-variant-numeric: tabular-nums; }
   .fact span { font-size: .72rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+
+  /* New cards rise in once; polling never re-creates unchanged ones. */
+  @media (prefers-reduced-motion: no-preference) {
+    .window, .fact, video, .error-card { animation: rise .5s ease both; }
+    .window:nth-child(2) { animation-delay: .07s; }
+    .window:nth-child(3) { animation-delay: .14s; }
+    .window:nth-child(4) { animation-delay: .21s; }
+    .fact:nth-child(2) { animation-delay: .05s; }
+    .fact:nth-child(3) { animation-delay: .1s; }
+    .fact:nth-child(4) { animation-delay: .15s; }
+  }
 
   .log {
     margin-top: 1.2rem; padding: .9rem 1rem; background: var(--ink);
@@ -355,7 +484,12 @@
           <span class="num" aria-hidden="true">1</span>
           <h2><label for="clip">Add your video</label></h2>
           <div class="body">
-            <label class="file-label" for="clip">Choose a video file</label>
+            <label class="file-label" for="clip">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 3l5 5h-3v6h-4V8H7l5-5Zm-7 15h14v2H5v-2Z"/>
+              </svg>
+              Choose a video file
+            </label>
             <input type="file" id="clip" name="clip" accept="video/*">
             <p class="picked" id="picked" aria-live="polite"></p>
             <p class="hint"><kbd>U</kbd>jumps here. Up to 162 seconds (120 MB max).</p>
@@ -415,7 +549,12 @@
           <span class="num" aria-hidden="true">4</span>
           <h2><label for="go">Describe it</label></h2>
           <div class="body">
-            <button type="submit" class="go" id="go">Describe my video</button>
+            <button type="submit" class="go" id="go">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M4 4.5v15a1 1 0 0 0 1.53.85l12-7.5a1 1 0 0 0 0-1.7l-12-7.5A1 1 0 0 0 4 4.5Z"/>
+              </svg>
+              Describe my video
+            </button>
             <output class="status" id="status" aria-live="polite"></output>
             <p class="hint"><kbd>D</kbd>starts. <kbd>?</kbd>reads these
                instructions aloud at any time.</p>
@@ -426,12 +565,29 @@
 
     <section id="result" hidden aria-labelledby="result-title">
       <div class="result-head">
-        <h2 id="result-title">Your described video</h2>
+        <h2 id="result-title" tabindex="-1">Describing your video</h2>
         <p class="meta" id="result-meta"></p>
       </div>
-      <div class="bar" role="presentation"><span id="bar-fill"></span></div>
-      <p class="bar-label" id="bar-label" role="status"></p>
-      <video id="player" controls preload="metadata" hidden></video>
+
+      <div class="run" id="run">
+        <div class="run-top">
+          <p class="run-stage" id="run-stage">Starting…</p>
+          <p class="run-clock" id="run-clock"></p>
+        </div>
+        <div class="bar" id="bar" role="progressbar" aria-label="Pipeline progress"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <span id="bar-fill"></span>
+        </div>
+        <ol class="stages" id="stages" aria-label="Pipeline stages"></ol>
+        <p class="sr-only" id="stage-live" role="status"></p>
+      </div>
+
+      <video id="player" controls preload="metadata" hidden
+             aria-label="Your described video"></video>
+      <div class="error-card" id="error-card" hidden>
+        <h3>The run stopped</h3>
+        <p id="error-text"></p>
+      </div>
       <ul class="facts" id="facts"></ul>
       <ul class="windows" id="windows"></ul>
       <pre class="log" id="log" hidden aria-label="Pipeline log"></pre>
@@ -514,6 +670,8 @@
   const form = document.getElementById("describe-form");
   const status = document.getElementById("status");
 
+  const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   clip.addEventListener("change", () => {
     if (clip.files.length) {
       const f = clip.files[0];
@@ -526,26 +684,152 @@
   });
 
   // ------------------------------------------------------------------
-  // Run the real pipeline. The server starts it as a subprocess and the
-  // runner already writes stage/pct into status.json, so progress is read,
-  // never guessed. Poll until the stage reads "done" or an error appears.
+  // The run view. The server starts the pipeline as a subprocess and the
+  // runner writes stage/pct/stage_timings into status.json, so everything
+  // shown here is read, never guessed. The bar glides between polls (the
+  // easing is cosmetic; it never passes the stage it is actually in), and
+  // the timeline ticks each stage off with its measured time.
   // ------------------------------------------------------------------
   const result = document.getElementById("result");
+  const resultTitle = document.getElementById("result-title");
+  const runPanel = document.getElementById("run");
+  const runStage = document.getElementById("run-stage");
+  const runClock = document.getElementById("run-clock");
+  const bar = document.getElementById("bar");
   const barFill = document.getElementById("bar-fill");
-  const barLabel = document.getElementById("bar-label");
+  const stagesList = document.getElementById("stages");
+  const stageLive = document.getElementById("stage-live");
   const player = document.getElementById("player");
+  const errorCard = document.getElementById("error-card");
+  const errorText = document.getElementById("error-text");
   const facts = document.getElementById("facts");
   const windows = document.getElementById("windows");
   const logBox = document.getElementById("log");
   const resultMeta = document.getElementById("result-meta");
 
-  const STAGE_WORDS = {
-    queued: "Queued", validate: "Checking the video", gaps: "Listening for dialogue-free windows",
-    scenes: "Watching the frames", cast: "Working out who's who",
-    align: "Matching what's seen to where it's quiet",
-    narrate: "Writing the description", tts_fit: "Speaking it and fitting it to the gap",
-    mix: "Mixing it into your video", done: "Done",
-  };
+  // Order and wording must track drishti/pipeline.py STAGE_ORDER.
+  const STAGES = [
+    ["upload",  "Sending your video"],
+    ["validate","Checking the video"],
+    ["gaps",    "Listening for dialogue-free windows"],
+    ["scenes",  "Watching the frames"],
+    ["cast",    "Working out who's who"],
+    ["align",   "Matching what's seen to where it's quiet"],
+    ["narrate", "Writing the description"],
+    ["tts_fit", "Speaking it and fitting it to the gap"],
+    ["mix",     "Mixing it into your video"],
+  ];
+  const STAGE_INDEX = {};
+  STAGES.forEach(([key], i) => { STAGE_INDEX[key] = i; });
+
+  for (const [key, label] of STAGES) {
+    const li = document.createElement("li");
+    li.dataset.stage = key;
+    li.dataset.state = "pending";
+    const dot = document.createElement("span");
+    dot.className = "dot"; dot.setAttribute("aria-hidden", "true");
+    const took = document.createElement("span");
+    took.className = "took";
+    li.append(dot, document.createTextNode(label), took);
+    stagesList.append(li);
+  }
+
+  // run = everything about the flight in progress.
+  let run = null; // {startedAt, stageKey, stageAt, shown, goal, raf, clock}
+
+  function fmtClock(ms) {
+    const s = Math.floor(ms / 1000);
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function setBar(pct) {
+    barFill.style.width = pct + "%";
+    bar.setAttribute("aria-valuenow", String(Math.round(pct)));
+  }
+
+  // Upload owns the first 10% of the bar; the eight pipeline stages share
+  // the rest. Each stage may drift most of the way through its own slice
+  // while we wait, but never into the next stage's.
+  const UPLOAD_SHARE = 10;
+  const SLICE = (100 - UPLOAD_SHARE) / (STAGES.length - 1);
+
+  function goalFor(state) {
+    if (!run) return 0;
+    if (run.stageKey === "upload") return run.uploadPct * UPLOAD_SHARE;
+    if (run.stageKey === "done") return 100;
+    const base = UPLOAD_SHARE + (STAGE_INDEX[run.stageKey] - 1) * SLICE;
+    const drift = Math.min((Date.now() - run.stageAt) / 1000 * 0.6, SLICE - 1);
+    return Math.min(base + drift, 99);
+  }
+
+  function tick() {
+    if (!run) return;
+    run.goal = goalFor();
+    run.shown += (run.goal - run.shown) * (REDUCED ? 1 : 0.07);
+    if (run.goal - run.shown < 0.1) run.shown = run.goal;
+    setBar(run.shown);
+    if (!REDUCED) run.raf = requestAnimationFrame(tick);
+  }
+
+  function setStage(key, timings, isError) {
+    const idx = key === "done" ? STAGES.length : STAGE_INDEX[key];
+    // "queued" / "failed" aren't timeline stages — keep what's shown.
+    if (idx === undefined) return;
+    for (const li of stagesList.children) {
+      const at = STAGE_INDEX[li.dataset.stage];
+      const state = at < idx ? "done" : at === idx ? (isError ? "error" : "active") : "pending";
+      if (li.dataset.state !== state) li.dataset.state = state;
+      const took = timings && timings[li.dataset.stage];
+      li.lastChild.textContent = state === "done" && took ? took.toFixed(1) + "s" : "";
+    }
+    if (run && key !== run.stageKey) {
+      run.stageKey = key;
+      run.stageAt = Date.now();
+      if (key !== "done" && STAGE_INDEX[key] >= 1) {
+        const label = STAGES[STAGE_INDEX[key]][1];
+        runStage.textContent = label + "…";
+        // Announce stage CHANGES only — a percent-by-percent live region
+        // reads as noise through a screen reader.
+        stageLive.textContent = label + " — step " + STAGE_INDEX[key] +
+                                " of " + (STAGES.length - 1) + ".";
+      }
+      if (REDUCED) tick();
+    }
+  }
+
+  function startRun() {
+    if (run) { cancelAnimationFrame(run.raf); clearInterval(run.clock); }
+    result.hidden = false;
+    result.setAttribute("aria-busy", "true");
+    resultTitle.textContent = "Describing your video";
+    runPanel.className = "run";
+    runStage.classList.remove("is-error");
+    player.hidden = true; player.removeAttribute("src");
+    errorCard.hidden = true;
+    facts.replaceChildren(); windows.replaceChildren();
+    logBox.hidden = true;
+    lastFacts = lastWindows = "";
+    setBar(0);
+    run = { startedAt: Date.now(), stageKey: "", stageAt: Date.now(),
+            shown: 0, goal: 0, uploadPct: 0, raf: 0, clock: 0 };
+    run.clock = setInterval(() => {
+      if (run) runClock.textContent = fmtClock(Date.now() - run.startedAt);
+    }, 1000);
+    runClock.textContent = "0:00";
+    setStage("upload");
+    runStage.textContent = "Sending your video…";
+    if (!REDUCED) run.raf = requestAnimationFrame(tick);
+    resultTitle.focus({ preventScroll: false });
+  }
+
+  function endRun(ok) {
+    if (!run) return;
+    cancelAnimationFrame(run.raf); clearInterval(run.clock);
+    runClock.textContent = fmtClock(Date.now() - run.startedAt);
+    result.removeAttribute("aria-busy");
+    if (ok) { run.stageKey = "done"; setBar(100); }
+    run = null;
+  }
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -554,12 +838,12 @@
     return node;
   }
 
+  // Cards are only rebuilt when their data changes, so the entrance
+  // animation runs once instead of flickering on every poll.
+  let lastFacts = "", lastWindows = "";
+
   function render(state) {
-    barFill.style.width = state.pct + "%";
-    const word = STAGE_WORDS[state.stage] || state.stage;
-    barLabel.textContent = state.error
-      ? "Stopped — " + String(state.error).split("\n")[0]
-      : word + (state.stage === "done" ? "" : "…") + "  " + state.pct + "%";
+    setStage(state.stage, state.stage_timings, Boolean(state.error));
 
     const bits = [];
     // Show every binding: a wrong one cannot be prevented, only caught by eye.
@@ -571,7 +855,7 @@
       bits.push(name + " not recognised");
     }
     if (state.output_language) bits.push("narrating in " + state.output_language);
-    if (state.source_language) {
+    if (state.source_language && state.source_language !== "unknown") {
       bits.push("heard " + state.source_language +
                 (state.language_confidence != null
                   ? " (confidence " + state.language_confidence.toFixed(2) + ")" : ""));
@@ -588,7 +872,6 @@
     }
 
     // Facts: the numbers that show this was measured, not guessed.
-    facts.replaceChildren();
     if (state.chunks) {
       const spoken = state.gaps.length;
       const cards = [
@@ -599,59 +882,84 @@
       const calls = state.api.calls || {};
       const total = Object.values(calls).reduce((a, b) => a + b, 0);
       if (total) cards.push([total, "api calls"]);
-      for (const [value, label] of cards) {
-        const card = el("li", "fact");
-        card.append(el("b", null, String(value)), el("span", null, label));
-        facts.append(card);
+      const snapshot = JSON.stringify(cards);
+      if (snapshot !== lastFacts) {
+        lastFacts = snapshot;
+        facts.replaceChildren();
+        for (const [value, label] of cards) {
+          const card = el("li", "fact");
+          card.append(el("b", null, String(value)), el("span", null, label));
+          facts.append(card);
+        }
       }
     }
 
     // One card per window: what was said, and the evidence behind it.
-    windows.replaceChildren();
-    const spokenById = {};
-    for (const line of state.narration) spokenById[line.gap_index] = line;
-    for (const segment of state.segments) {
-      const line = spokenById[segment.gap_index];
-      const card = el("li", "window");
-      card.append(el("p", "when",
-        segment.start.toFixed(2) + "s – " + segment.end.toFixed(2) + "s" +
-        "   ·   room for " + segment.max_duration.toFixed(2) + "s" +
-        (line && line.wav_duration ? "   ·   spoke " + line.wav_duration.toFixed(2) + "s" : "")));
-      card.append(el("p", "said", line ? "“" + line.text + "”" : "not narrated yet"));
-      card.append(el("p", "why", segment.reason +
-        "   ·   budget " + segment.char_budget + " characters" +
-        (line ? ", used " + line.text.length : "")));
-      const beats = el("ul", "beats");
-      for (const beat of segment.beats) {
-        beats.append(el("li", null, "[" + beat.when + "] " + beat.event));
+    const winSnapshot = JSON.stringify([state.segments, state.narration]);
+    if (winSnapshot !== lastWindows) {
+      lastWindows = winSnapshot;
+      windows.replaceChildren();
+      const spokenById = {};
+      for (const line of state.narration) spokenById[line.gap_index] = line;
+      for (const segment of state.segments) {
+        const line = spokenById[segment.gap_index];
+        const card = el("li", "window");
+        card.append(el("p", "when",
+          segment.start.toFixed(2) + "s – " + segment.end.toFixed(2) + "s" +
+          "   ·   room for " + segment.max_duration.toFixed(2) + "s" +
+          (line && line.wav_duration ? "   ·   spoke " + line.wav_duration.toFixed(2) + "s" : "")));
+        card.append(el("p", "said", line ? "“" + line.text + "”" : "not narrated yet"));
+        card.append(el("p", "why", segment.reason +
+          "   ·   budget " + segment.char_budget + " characters" +
+          (line ? ", used " + line.text.length : "")));
+        const beats = el("ul", "beats");
+        for (const beat of segment.beats) {
+          beats.append(el("li", null, "[" + beat.when + "] " + beat.event));
+        }
+        card.append(beats);
+        windows.append(card);
       }
-      card.append(beats);
-      windows.append(card);
     }
 
-    if (state.error) {
-      logBox.textContent = String(state.error) +
-        (state.log && state.log.length ? "\n\n" + state.log.join("\n") : "");
-      logBox.hidden = false;
-    } else if (state.log && state.log.length) {
+    if (state.log && state.log.length) {
       logBox.textContent = state.log.join("\n");
       logBox.hidden = false;
     }
   }
 
+  function fail(state) {
+    const message = String(state.error);
+    runPanel.classList.add("is-error");
+    runStage.classList.add("is-error");
+    const at = STAGE_INDEX[state.stage];
+    runStage.textContent = "Stopped" +
+      (at ? " while " + STAGES[at][1].toLowerCase() : "");
+    errorText.textContent = message;
+    errorCard.hidden = false;
+    stageLive.textContent = "The run stopped. " + message.split("\n")[0];
+    status.textContent = "The run stopped — details below.";
+    endRun(false);
+  }
+
   function poll(jobId) {
     fetch("/api/job/" + jobId).then((r) => r.json()).then((state) => {
-      if (state.error && !state.stage) { barLabel.textContent = state.error; return; }
+      if (state.error && !state.stage) { runStage.textContent = state.error; endRun(false); return; }
       render(state);
       if (state.stage === "done") {
+        setStage("done", state.stage_timings);
+        runPanel.classList.add("is-done");
+        runStage.textContent = "Done — your described video is below";
+        resultTitle.textContent = "Your described video";
+        endRun(true);
         status.textContent = "Done — your described video is below.";
+        stageLive.textContent = "Done. Your described video is ready.";
         speak("Your described video is ready. " + state.segments.length +
               " description" + (state.segments.length === 1 ? "" : "s") + " added.");
         return;
       }
-      if (state.error) { status.textContent = "The run stopped. See the log below."; return; }
+      if (state.error) { fail(state); return; }
       setTimeout(() => poll(jobId), 1200);
-    }).catch(() => { barLabel.textContent = "Lost contact with the server."; });
+    }).catch(() => { runStage.textContent = "Lost contact with the server."; });
   }
 
   form.addEventListener("submit", (e) => {
@@ -665,29 +973,38 @@
     const langLabel = language.options[language.selectedIndex].textContent;
     status.textContent = "Uploading " + file.name + " · " + langLabel +
       (cast.value.trim() ? " · " + cast.value.trim() : "") + "…";
-    result.hidden = false;
-    player.hidden = true; player.removeAttribute("src");
-    facts.replaceChildren(); windows.replaceChildren();
-    logBox.hidden = true;
-    barFill.style.width = "0%";
-    barLabel.textContent = "Uploading…";
+    startRun();
 
     const query = "?name=" + encodeURIComponent(file.name) +
                   "&language=" + encodeURIComponent(language.value) +
                   "&cast=" + encodeURIComponent(cast.value.trim()) +
                   (scriptReadyId ? "&script=" + encodeURIComponent(scriptReadyId) : "");
-    fetch("/api/describe" + query, { method: "POST", body: file })
-      .then((r) => r.json())
-      .then((started) => {
-        if (!started.job) throw new Error(started.error || "could not start");
-        status.textContent = "Running — progress is below.";
-        poll(started.job);
-      })
-      .catch((err) => {
-        status.textContent = "Could not start: " + err.message +
-          ". Is the DRISHTI server running? Use “make web”.";
-        barLabel.textContent = "";
-      });
+    // XHR instead of fetch: it reports upload progress, so the first stretch
+    // of the bar is your file actually leaving the machine, not a guess.
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/describe" + query);
+    xhr.upload.onprogress = (ev) => {
+      if (run && ev.lengthComputable) {
+        run.uploadPct = ev.loaded / ev.total;
+        runStage.textContent = "Sending your video — " +
+          Math.round(run.uploadPct * 100) + "%";
+        if (REDUCED) tick();
+      }
+    };
+    xhr.onload = () => {
+      let started = {};
+      try { started = JSON.parse(xhr.responseText); } catch (err) { /* fall through */ }
+      if (!started.job) {
+        fail({ error: started.error || "could not start (HTTP " + xhr.status + ")" });
+        return;
+      }
+      status.textContent = "Running — progress is below.";
+      poll(started.job);
+    };
+    xhr.onerror = () => {
+      fail({ error: "Could not reach the DRISHTI server. Is it running? Use “make web”." });
+    };
+    xhr.send(file);
   });
 
   // ------------------------------------------------------------------

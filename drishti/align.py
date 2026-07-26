@@ -63,7 +63,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import log, read_json, write_json
-from .config import char_budget
+from .config import normalize_tone, tone_char_budget
 
 # A narration must leave a little air before dialogue resumes.
 TAIL_PADDING = 0.25
@@ -269,6 +269,7 @@ def select(
     *,
     language: str | None = None,
     cast: dict[str, str] | None = None,
+    tone: str | None = None,
     max_segments: int = 4,
     min_confidence: float = MIN_CONFIDENCE,
     lookback: float = LOOKBACK,
@@ -340,8 +341,13 @@ def select(
             "start": float(gap["start"]),
             "end": float(gap["end"]),
             "max_duration": max_duration,
-            "char_budget": char_budget(max_duration, language),
+            # Budgeted at the pace this tone will actually be spoken at. A
+            # slower tone fits fewer characters in the same window, and sizing
+            # at the base pace would push exactly those lines into the fit
+            # loop's shorten-or-skip path.
+            "char_budget": tone_char_budget(max_duration, language, tone),
             "language": language,
+            "tone": normalize_tone(tone),
             # {name: visual description} for characters a human named. narrate
             # renders this so the MODEL can link a name to however the prose
             # happens to phrase it — the general case that string substitution
@@ -406,6 +412,7 @@ def plan(job: Path, cfg: dict) -> None:
         beats,
         language=cfg.get("output_language"),
         cast=named,
+        tone=scenes.get("tone") if isinstance(scenes, dict) else None,
         max_segments=int(cfg.get("max_segments", 4)),
         min_confidence=float(cfg.get("min_confidence", MIN_CONFIDENCE)),
         lookback=float(cfg.get("lookback", LOOKBACK)),

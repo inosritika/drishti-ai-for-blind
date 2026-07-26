@@ -106,7 +106,7 @@ from .common import (
     script_ok,
     write_json,
 )
-from .config import SUPPORTED_TTS
+from .config import SUPPORTED_TTS, tone_register
 
 CHAT_URL = f"{SARVAM_BASE_URL}/v1/chat/completions"
 CHAT_MODEL = "sarvam-105b"
@@ -290,8 +290,14 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
             f"  {i + 1}. {(beat.get('event') or '').strip()}"
             for i, beat in enumerate(required)
         )
+        # The ceiling outranks coverage. The old wording ("MUST reference all")
+        # made the model obey the checklist over the character budget — 159
+        # chars against 87 on the Chalti brawl, which tts_fit could not rescue
+        # and skipped. A complete short line under budget beats full coverage.
         coverage_note = (
-            f"Your one sentence MUST reference all of the following, in this order:\n"
+            "Cover the following in this order of importance, and STOP adding "
+            "content as you near the character ceiling — drop the later items "
+            "without hesitation rather than run over:\n"
             f"{checklist}\n\n"
             "Merge related items into clauses; do not spend a sentence each. Do not "
             "invent detail beyond these items. `after` beats are look-ahead: mention "
@@ -299,12 +305,20 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
         )
     elif target_count == 1:
         beat_event = (coverable[0].get("event") or "").strip()
-        coverage_note = (
-            f"Your one sentence should describe this beat: {beat_event}\n\n"
-            "Keep it a natural, complete sentence. Do not force in the other beats; "
-            "the budget is too tight for more than one clean clause. `after` beats "
-            "are look-ahead: drop them entirely."
-        )
+        if char_budget < 140:
+            coverage_note = (
+                f"Your one sentence should describe this beat: {beat_event}\n\n"
+                "Keep it a natural, complete sentence. Do not force in the other beats; "
+                "the budget is too tight for more than one clean clause. `after` beats "
+                "are look-ahead: drop them entirely."
+            )
+        else:
+            coverage_note = (
+                f"The primary beat to describe: {beat_event}\n\n"
+                "Unfold it across your sentences moment by moment, adding real "
+                "detail from the surrounding beats without padding. `after` "
+                "beats are look-ahead: drop them entirely."
+            )
     else:
         coverage_note = (
             "There is one primary beat to describe. Add relevant detail from "
@@ -339,8 +353,33 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
             f"written in that same script.\n"
         )
 
+    # Ritika reads the scene's mood; this turns it into a writing style.
+    # Deliberately modulated, not theatrical — an over-acted describer reads as
+    # patronising, and professional AD keeps the narrator out of the film's way.
+    register = tone_register(segment.get("tone"))
+
+    # A long silence with a one-line description leaves the listener abandoned:
+    # every single-sentence run on the 28.7s Chaplin window filled at most 54%
+    # of its budget. Ask for a counted number of SHORT sentences instead — one
+    # moment each — sized at ~110 chars of spoken sentence. Short windows keep
+    # the single-sentence ask, which the run history shows lands on budget.
+    if char_budget >= 140:
+        n_sentences = max(2, min(4, char_budget // 110))
+        closing = (
+            f"This is a LONG gap. Write EXACTLY {n_sentences} short sentences "
+            "of audio description — one moment each, in chronological order. "
+            f"The TOTAL of all {n_sentences} sentences together must stay under "
+            f"the {char_budget}-character ceiling, so keep each sentence to "
+            f"roughly {char_budget // n_sentences} characters."
+        )
+    else:
+        closing = "Write one sentence of audio description within the character budget."
+
     return (
         f"{cast_note}"
+        f"Register for this scene: {register} "
+        "The register shapes word choice and rhythm only — it must never make "
+        "the line longer.\n\n"
         f"Character budget: return between {floor} and {char_budget} characters. "
         f"Aim close to {char_budget} when there is more than one beat worth "
         "mentioning — the listener wants coverage, not brevity for its own sake. "
@@ -351,7 +390,7 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
         f"Visible beats:\n{beats_block}\n\n"
         "Dialogue transcript for context — DO NOT repeat what any of this says:\n"
         f'"""\n{transcript_block}\n"""\n\n'
-        "Write one sentence of audio description within the character budget."
+        f"{closing}"
     )
 
 
@@ -450,6 +489,7 @@ def write(job: Path, cfg: dict) -> None:
             "end": float(segment["end"]),
             "max_duration": float(segment["max_duration"]),
             "language": language,
+            "tone": segment.get("tone"),
             "text": text,
         })
         preview = text if len(text) <= 60 else text[:60] + "…"
