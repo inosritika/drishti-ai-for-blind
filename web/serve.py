@@ -194,7 +194,10 @@ class Handler(BaseHTTPRequestHandler):
         if origin in LOCAL_UI_ORIGINS or origin == VERCEL_UI_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Range")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type, Range, ngrok-skip-browser-warning",
+            )
             self.send_header("Access-Control-Expose-Headers", "Accept-Ranges, Content-Range")
             self.send_header("Vary", "Origin")
         super().end_headers()

@@ -438,6 +438,13 @@
   const BACKEND_URL = backendUrl();
   const DEPLOYED_ON_VERCEL = window.location.hostname.endsWith(".vercel.app");
   function apiUrl(path) { return BACKEND_URL ? BACKEND_URL + path : path; }
+  function backendFetch(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    // ngrok Free shows an HTML interstitial to browser requests unless this
+    // documented header is present. The API expects JSON, not that page.
+    if (BACKEND_URL) headers.set("ngrok-skip-browser-warning", "1");
+    return fetch(apiUrl(path), { ...options, headers });
+  }
   function needsBackend() {
     if (!DEPLOYED_ON_VERCEL || BACKEND_URL) return false;
     status.textContent = "This public UI needs the current laptop backend URL. " +
@@ -567,7 +574,7 @@
   }
 
   function poll(jobId) {
-    fetch(apiUrl("/api/job/" + jobId)).then((r) => r.json()).then((state) => {
+    backendFetch("/api/job/" + jobId).then((r) => r.json()).then((state) => {
       if (state.error && !state.stage) { barLabel.textContent = state.error; return; }
       render(state);
       if (state.stage === "done") {
@@ -601,7 +608,7 @@
     const query = "?name=" + encodeURIComponent(file.name) +
                   "&language=" + encodeURIComponent(language.value) +
                   "&cast=" + encodeURIComponent(cast.value.trim());
-    fetch(apiUrl("/api/describe") + query, { method: "POST", body: file })
+    backendFetch("/api/describe" + query, { method: "POST", body: file })
       .then((r) => r.json())
       .then((started) => {
         if (!started.job) throw new Error(started.error || "could not start");
@@ -692,7 +699,7 @@
 
     if (needsBackend()) return;
     announce("Heard you — asking Saaras…");
-    fetch(apiUrl("/api/hear"), { method: "POST", headers: { "Content-Type": "audio/wav" },
+    backendFetch("/api/hear", { method: "POST", headers: { "Content-Type": "audio/wav" },
                          body: encodeWav(joined, sampleRate) })
       .then((r) => r.json())
       .then((result) => {
