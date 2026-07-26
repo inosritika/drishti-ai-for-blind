@@ -305,7 +305,27 @@ def bind(job: Path, cfg: dict) -> None:
     scenes = read_json(job / "scenes.json", default={})
     candidates = candidate_descriptors(scenes if isinstance(scenes, dict) else {})
 
-    result: dict[str, Any] = {"bindings": {}, "unmatched": names, "candidates": candidates}
+    # "Name=man3" pins a binding by hand, bypassing vision for that name. The
+    # model identifies by *appearance*, and appearance can be genuinely
+    # ambiguous — the Chalti close-up is Brijmohan to anyone who knows the
+    # film, but no frame proves it. A human who knows the film outranks the
+    # model; entity ids come from scenes.json (cached, so stable across runs).
+    entity_ids = set((scenes or {}).get("entity_details") or {})
+    pinned: dict[str, str] = {}
+    remaining: list[str] = []
+    for name in names:
+        head, _, entity = name.partition("=")
+        if entity and entity.strip() in entity_ids:
+            pinned[entity.strip()] = head.strip()
+        else:
+            remaining.append(name)
+    names = remaining
+
+    result: dict[str, Any] = {"bindings": dict(pinned), "unmatched": names,
+                              "candidates": candidates}
+    if pinned:
+        for entity, name in pinned.items():
+            log(f"  cast: {name} = '{entity}' (pinned by hand)")
 
     if not names:
         write_json(job / "cast.json", result)
@@ -335,8 +355,12 @@ def bind(job: Path, cfg: dict) -> None:
     reply = _ask(frames, names, candidates)
 
     bindings = expand_generic(parse_reply(reply, names, candidates), candidates)
-    result["bindings"] = bindings
-    result["unmatched"] = [n for n in names if n not in bindings.values()]
+    # A hand-pinned binding outranks whatever the model saw, for its entity
+    # AND its name — drop any model row that reuses either.
+    bindings = {e: n for e, n in bindings.items()
+                if e not in pinned and n not in pinned.values()}
+    result["bindings"] = {**bindings, **pinned}
+    result["unmatched"] = [n for n in names if n not in result["bindings"].values()]
     write_json(job / "cast.json", result)
 
     for descriptor, name in bindings.items():

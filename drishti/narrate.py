@@ -410,14 +410,28 @@ def _generate_line(
 
     text = _sarvam_chat(system, user)
 
-    if len(text) > char_budget:
+    # Aim retries BELOW budget, not at it: a retry aimed at the ceiling lands
+    # a little over (190 against 158 on bean), which forces the fit loop to
+    # speed the delivery to its cap — audibly rushed. Two escalating passes:
+    # the brawl's tight window came back 163/87 after one, and a second at a
+    # harsher target is cheaper than losing the whole narration to a skip.
+    for fraction in (0.9, 0.75):
+        if len(text) <= char_budget:
+            break
+        retry_target = int(char_budget * fraction)
         retry_user = (
             user
             + f"\n\nYour previous reply was {len(text)} characters, over the "
-            f"{char_budget}-character target. Rewrite the same idea under "
-            f"{char_budget} characters, keeping a complete sentence."
+            f"{char_budget}-character ceiling. Rewrite the same idea in UNDER "
+            f"{retry_target} characters — cut the least important clause "
+            f"entirely rather than compressing every clause. Never drop a "
+            f"character's NAME to save space; cut description instead."
         )
-        text = _sarvam_chat(system, retry_user)
+        retried = _sarvam_chat(system, retry_user)
+        # The retry exists to shorten. If it rambled longer instead (bean came
+        # back 190 -> 213), keep the shorter failure for tts_fit to rescue.
+        if len(retried) < len(text):
+            text = retried
 
     if not script_ok(text, language):
         lang_name = LANGUAGE_PROMPT_NAME[language]
