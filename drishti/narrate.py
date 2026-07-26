@@ -106,7 +106,7 @@ from .common import (
     script_ok,
     write_json,
 )
-from .config import SUPPORTED_TTS
+from .config import SUPPORTED_TTS, tone_register
 
 CHAT_URL = f"{SARVAM_BASE_URL}/v1/chat/completions"
 CHAT_MODEL = "sarvam-105b"
@@ -339,8 +339,14 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
             f"written in that same script.\n"
         )
 
+    # Ritika reads the scene's mood; this turns it into a writing style.
+    # Deliberately modulated, not theatrical — an over-acted describer reads as
+    # patronising, and professional AD keeps the narrator out of the film's way.
+    register = tone_register(segment.get("tone"))
+
     return (
         f"{cast_note}"
+        f"Register for this scene: {register}\n\n"
         f"Character budget: return between {floor} and {char_budget} characters. "
         f"Aim close to {char_budget} when there is more than one beat worth "
         "mentioning — the listener wants coverage, not brevity for its own sake. "
@@ -450,6 +456,7 @@ def write(job: Path, cfg: dict) -> None:
             "end": float(segment["end"]),
             "max_duration": float(segment["max_duration"]),
             "language": language,
+            "tone": segment.get("tone"),
             "text": text,
         })
         preview = text if len(text) <= 60 else text[:60] + "…"

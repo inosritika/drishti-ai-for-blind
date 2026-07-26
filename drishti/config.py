@@ -228,8 +228,30 @@ TONE_PRESETS: dict[str, Tone] = {
 TONES: frozenset[str] = frozenset(TONE_PRESETS)
 
 
+# scenes.py asks its model for a short mood label in free prose — real replies
+# include "comic and exaggerated", "tense and suspenseful", "relaxing". Ours is
+# a fixed set of six. Requiring an exact match silently sent EVERY real clip to
+# neutral, so the whole tone system did nothing while looking wired up. Map the
+# vocabulary instead: it costs nothing, needs no schema change from Ritika, and
+# still lands on neutral when nothing matches.
+_TONE_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "tense": ("tense", "suspense", "anxious", "ominous", "menacing", "urgent",
+              "dramatic", "threatening", "uneasy", "eerie"),
+    "energetic": ("energetic", "action", "fast", "lively", "frantic", "chaotic",
+                  "exciting", "dynamic", "hectic", "busy"),
+    "playful": ("playful", "comic", "comedy", "comedic", "funny", "humorous",
+                "humour", "humor", "light", "whimsical", "silly", "exaggerated",
+                "slapstick", "amusing", "quirky"),
+    "gentle": ("gentle", "calm", "warm", "tender", "relaxing", "relaxed",
+               "peaceful", "quiet", "serene", "soft", "intimate"),
+    "somber": ("somber", "sombre", "sad", "melancholy", "mournful", "grim",
+               "bleak", "solemn", "tragic", "heavy", "grave"),
+    "neutral": ("neutral", "plain", "matter", "ordinary", "everyday", "routine"),
+}
+
+
 def normalize_tone(value: str | None) -> str:
-    """Map anything to a known tone. Unrecognised input becomes neutral.
+    """Map any mood wording to one of our tones. Unrecognised becomes neutral.
 
     A model picking its own label must never be able to fail the run — a
     surprising tone is a small cosmetic loss, a crash is a demo.
@@ -237,7 +259,15 @@ def normalize_tone(value: str | None) -> str:
     if not value:
         return NEUTRAL_TONE
     candidate = str(value).strip().lower()
-    return candidate if candidate in TONE_PRESETS else NEUTRAL_TONE
+    if candidate in TONE_PRESETS:
+        return candidate
+    # Longest keyword first, so "comic" is not beaten by a stray short match.
+    best: tuple[int, str] = (0, NEUTRAL_TONE)
+    for tone, words in _TONE_SYNONYMS.items():
+        for word in words:
+            if word in candidate and len(word) > best[0]:
+                best = (len(word), tone)
+    return best[1]
 
 
 def tone_params(
