@@ -39,6 +39,7 @@ LANGUAGE:
 from __future__ import annotations
 
 import base64
+import re
 from math import floor
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,10 @@ CHAT_CACHE_NS = "sarvam_chat"
 # budget assumes narration comes out at pace 1.05.
 BASE_PACE = 1.05
 MAX_PACE = 1.5
+# Re-pacing is for trimming a near-miss, not for racing: above ~1.3 the
+# delivery is audibly rushed (bean gap 0 rendered at 1.38 and the user heard
+# it immediately). Past this cap we shorten the TEXT instead of the clock.
+REPACE_CAP = 1.30
 SAMPLE_RATE = 24000
 TEMPERATURE = 0.35
 
@@ -184,7 +189,7 @@ def _fit(
         return text, pace, actual
 
     # --- attempt 2: re-pace -------------------------------------------------
-    pace = min(MAX_PACE, pace * actual / max_duration * 1.04)
+    pace = min(max(REPACE_CAP, pace), pace * actual / max_duration * 1.04)
     wav_bytes = _synthesize(text, language, speaker, pace, temperature)
     wav_path.write_bytes(wav_bytes)
     actual = media_duration(wav_path)
@@ -225,6 +230,23 @@ def _fit(
 
     if actual <= limit:
         return shortened, pace, actual
+
+    # --- attempt 4: drop trailing sentences ---------------------------------
+    # Deterministic last resort. Raising the pace instead is a trap: Bulbul is
+    # non-monotonic (pace 1.49 rendered LONGER than 1.30 on the same line).
+    # A shorter complete utterance is honest AD; a silent window is not. Never
+    # cuts mid-sentence — whole trailing sentences only.
+    sentences = re.split(r"(?<=[।.!?])\s+", shortened)
+    while len(sentences) > 1 and actual > limit:
+        sentences.pop()
+        candidate = " ".join(sentences).strip()
+        wav_bytes = _synthesize(candidate, language, speaker, pace, temperature)
+        wav_path.write_bytes(wav_bytes)
+        actual = media_duration(wav_path)
+        log(f"    attempt 4: dropped to {len(sentences)} sentence(s), "
+            f"{len(candidate)} chars, actual={actual:.2f}s")
+        if actual <= limit:
+            return candidate, pace, actual
 
     # --- give up ------------------------------------------------------------
     wav_path.unlink(missing_ok=True)

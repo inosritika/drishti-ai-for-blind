@@ -137,3 +137,16 @@ Archive copy of *Easy Street* (1917) is one. `ffprobe` shows video only, so
 there is nothing for `validate` to extract and nothing for Saaras to hear. The
 copy of *The Immigrant* we use does have its piano score, so this does not
 block us, but `media.py` should say so plainly rather than fail obscurely.
+
+## Sintel (action demo)
+
+`sintel_fight.mp4` — the snow fight, cut 45–74s from *Sintel* (Blender
+Foundation, 2010), item `Sintel` on the Internet Archive, file
+`sintel-2048-stereo_512kb.mp4`. **CC-BY 3.0 — credit "© Blender Foundation |
+durian.blender.org" wherever it is shown.** No dialogue in this window, so run
+with `--language en-IN` (or any Bulbul language) and `--cast "Sintel"`.
+
+This is the deliberate answer to "can we demo a superhero clip": commercial
+hero footage (Spider-Man etc.) is copyrighted everywhere it appears, and a
+ripped clip in the submission is the same DQ risk as `whatsapp_clip.mp4`.
+Sintel is cinematic action we can actually show.
