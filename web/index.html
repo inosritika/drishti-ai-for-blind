@@ -147,6 +147,22 @@
   }
   select:hover { border-color: var(--muted); }
 
+  input[type="text"] {
+    width: 100%; max-width: 24rem; min-height: 48px;
+    font: inherit; font-size: 1rem;
+    color: var(--text); background: var(--ink);
+    border: 2px solid var(--line); border-radius: 10px;
+    padding: .6rem .9rem;
+  }
+  input[type="text"]:hover { border-color: var(--muted); }
+  input[type="text"]::placeholder { color: #6b7382; }
+
+  .optional {
+    font-size: .7rem; font-weight: 400; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted); margin-left: .5rem;
+    vertical-align: middle;
+  }
+
   /* Voice input: the select's louder twin. */
   .or { display: flex; align-items: center; gap: .8rem; margin: 1.1rem 0 .9rem;
         color: var(--muted); font-size: .8rem; letter-spacing: .14em; }
@@ -319,7 +335,7 @@
             <label class="file-label" for="clip">Choose a video file</label>
             <input type="file" id="clip" name="clip" accept="video/*">
             <p class="picked" id="picked" aria-live="polite"></p>
-            <p class="hint"><kbd>U</kbd>jumps here. Up to 30 seconds for now.</p>
+            <p class="hint"><kbd>U</kbd>jumps here. Up to 162 seconds (120 MB max).</p>
           </div>
         </li>
 
@@ -361,6 +377,19 @@
 
         <li class="step">
           <span class="num" aria-hidden="true">3</span>
+          <h2><label for="cast">Who's in it? <span class="optional">optional</span></label></h2>
+          <div class="body">
+            <input type="text" id="cast" name="cast" autocomplete="off"
+                   placeholder="Mr Bean, Teddy">
+            <p class="hint"><kbd>W</kbd>jumps here. Give the names and DRISHTI says
+               “Mr Bean reaches for the kettle” instead of “a man reaches for the
+               kettle”. Names only ever come from you — DRISHTI never guesses one,
+               and if it can't tell who's who it keeps the description instead.</p>
+          </div>
+        </li>
+
+        <li class="step">
+          <span class="num" aria-hidden="true">4</span>
           <h2><label for="go">Describe it</label></h2>
           <div class="body">
             <button type="submit" class="go" id="go">Describe my video</button>
@@ -444,6 +473,7 @@
   const clip = document.getElementById("clip");
   const picked = document.getElementById("picked");
   const language = document.getElementById("language");
+  const cast = document.getElementById("cast");
   const form = document.getElementById("describe-form");
   const status = document.getElementById("status");
 
@@ -474,7 +504,8 @@
 
   const STAGE_WORDS = {
     queued: "Queued", validate: "Checking the video", gaps: "Listening for dialogue-free windows",
-    scenes: "Watching the frames", align: "Matching what's seen to where it's quiet",
+    scenes: "Watching the frames", cast: "Working out who's who",
+    align: "Matching what's seen to where it's quiet",
     narrate: "Writing the description", tts_fit: "Speaking it and fitting it to the gap",
     mix: "Mixing it into your video", done: "Done",
   };
@@ -490,10 +521,18 @@
     barFill.style.width = state.pct + "%";
     const word = STAGE_WORDS[state.stage] || state.stage;
     barLabel.textContent = state.error
-      ? "Stopped: " + state.error
+      ? "Stopped — " + String(state.error).split("\n")[0]
       : word + (state.stage === "done" ? "" : "…") + "  " + state.pct + "%";
 
     const bits = [];
+    // Show every binding: a wrong one cannot be prevented, only caught by eye.
+    const bindings = (state.cast && state.cast.bindings) || {};
+    for (const descriptor in bindings) {
+      bits.push(bindings[descriptor] + " = " + descriptor);
+    }
+    for (const name of (state.cast && state.cast.unmatched) || []) {
+      bits.push(name + " not recognised");
+    }
     if (state.output_language) bits.push("narrating in " + state.output_language);
     if (state.source_language) {
       bits.push("heard " + state.source_language +
@@ -505,6 +544,10 @@
     if (state.video && player.getAttribute("src") !== state.video) {
       player.src = state.video;
       player.hidden = false;
+      // Setting src alone left Chrome's media element in NETWORK_EMPTY on the
+      // completed-job view. Start the load explicitly so metadata, duration,
+      // and native controls become available as soon as output.mp4 exists.
+      player.load();
     }
 
     // Facts: the numbers that show this was measured, not guessed.
@@ -549,7 +592,11 @@
       windows.append(card);
     }
 
-    if (state.log && state.log.length) {
+    if (state.error) {
+      logBox.textContent = String(state.error) +
+        (state.log && state.log.length ? "\n\n" + state.log.join("\n") : "");
+      logBox.hidden = false;
+    } else if (state.log && state.log.length) {
       logBox.textContent = state.log.join("\n");
       logBox.hidden = false;
     }
@@ -578,7 +625,9 @@
       return;
     }
     const file = clip.files[0];
-    status.textContent = "Uploading " + file.name + "…";
+    const langLabel = language.options[language.selectedIndex].textContent;
+    status.textContent = "Uploading " + file.name + " · " + langLabel +
+      (cast.value.trim() ? " · " + cast.value.trim() : "") + "…";
     result.hidden = false;
     player.hidden = true; player.removeAttribute("src");
     facts.replaceChildren(); windows.replaceChildren();
@@ -587,7 +636,8 @@
     barLabel.textContent = "Uploading…";
 
     const query = "?name=" + encodeURIComponent(file.name) +
-                  "&language=" + encodeURIComponent(language.value);
+                  "&language=" + encodeURIComponent(language.value) +
+                  "&cast=" + encodeURIComponent(cast.value.trim());
     fetch("/api/describe" + query, { method: "POST", body: file })
       .then((r) => r.json())
       .then((started) => {
@@ -793,9 +843,10 @@
   // Keyboard shortcuts. Never steal keys from a control the user is operating.
   const HELP =
     "Drishti turns a short video into an audio-described video. " +
-    "Three steps. Press U to choose a video file, up to 30 seconds. " +
+    "Three steps. Press U to choose a video file, up to 162 seconds. " +
     "Press L to choose the narration language from a list, or press V and " +
-    "simply say it — in any language. The default matches the video's own " +
+    "simply say it — in any language. Press W to name the characters, so " +
+    "descriptions use their names. The default matches the video's own " +
     "language automatically. Press D to start describing. " +
     "If you also have the screenplay as a PDF, press S to add it and Drishti " +
     "will read the written script out of it. " +
@@ -817,6 +868,7 @@
     if (key === "u") { e.preventDefault(); clip.focus(); }
     else if (key === "l") { e.preventDefault(); language.focus(); }
     else if (key === "v") { e.preventDefault(); say.focus(); startRecording(); }
+    else if (key === "w") { e.preventDefault(); cast.focus(); }
     else if (key === "d") { e.preventDefault(); form.requestSubmit(); }
     else if (key === "s") { e.preventDefault(); scriptPdf.focus(); }
     else if (e.key === "?") { e.preventDefault(); speak(HELP); }

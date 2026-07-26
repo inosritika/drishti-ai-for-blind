@@ -62,11 +62,31 @@ runs/dev/<job_id>/
   transcript.txt    Nishant
   language.json     Nishant
   scenes.json       Ritika
+  scenes-param.json Ritika (resolved experiment settings)
+  scenes-evidence.json Ritika (sampled-frame references)
   segments.json     Aryan
   narration.json    Tanishq
   narration_XX.wav  Tanishq
   output.mp4        Nishant
   status.json       Aryan (pipeline only — no stage writes this)
+```
+
+`scenes.json` contains a short full-video `summary`, a short visible `tone`,
+an `entity_details` object such as
+`{"woman1": "Dark-haired woman wearing a white dress."}`, and the existing
+timeline `beats`. A numbered ID is reused for the same visible person or
+character, and beat `entities` refer to that ID. Objects and settings can
+remain normal descriptive strings.
+
+Run scene understanding on any video and override experiment settings without
+editing code:
+
+```bash
+python3 -m drishti.scenes \
+  --video /absolute/path/to/video.mp4 \
+  --label my-test \
+  --set tone_max_words=4 \
+  --set entity_description_max_words=18
 ```
 
 ## Script from a PDF (side pathway, not a stage)

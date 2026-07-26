@@ -1,5 +1,9 @@
 {
   "summary": "Dark cars arrive outside a building; suited men get out and move inside to a modern boardroom, where a meeting begins.",
+  "tone": "serious and formal",
+  "entity_details": {
+    "group1": "Several men wearing dark business suits."
+  },
   "beats": [
     {
       "start": 0.0,
@@ -14,7 +18,7 @@
       "start": 1.0,
       "end": 6.5,
       "event": "Men in suits get out of the cars and gather near the entrance.",
-      "entities": ["men in suits", "cars", "entrance"],
+      "entities": ["group1", "cars", "entrance"],
       "intensity": 2,
       "confidence": 0.81,
       "uncertain_details": ["exact number of men", "whether they speak to each other"]
@@ -32,7 +36,7 @@
       "start": 10.0,
       "end": 13.5,
       "event": "The men enter a modern boardroom with a long table.",
-      "entities": ["men in suits", "boardroom", "table"],
+      "entities": ["group1", "boardroom", "table"],
       "intensity": 2,
       "confidence": 0.79,
       "uncertain_details": ["number of people already seated"]

@@ -57,7 +57,7 @@ from drishti.script_doc import extract_script  # noqa: E402
 
 PORT = 8080
 MAX_AUDIO = 4 * 1024 * 1024    # a few seconds of 16kHz mono WAV is ~100KB
-MAX_VIDEO = 120 * 1024 * 1024  # 29s of 720p is ~12MB; leave generous room
+MAX_VIDEO = 120 * 1024 * 1024  # two minutes of typical 720p fits comfortably
 MAX_PDF = 25 * 1024 * 1024     # ten pages of a screenplay is well under 1MB
 
 JOB_ID = re.compile(r"^[0-9]{8}_[0-9]{6}_[a-z0-9-]+$")
@@ -132,7 +132,7 @@ def hear(wav_bytes: bytes) -> dict:
     return {"language": language, "transcript": transcript, "heard": how}
 
 
-def start_job(video: bytes, filename: str, language: str) -> str:
+def start_job(video: bytes, filename: str, language: str, cast: str = "") -> str:
     """Create a job directory, then run the pipeline on it in the background."""
     profile = get_profile("dev")
     suffix = Path(filename).suffix.lower() or ".mp4"
@@ -151,6 +151,8 @@ def start_job(video: bytes, filename: str, language: str) -> str:
                "--profile", profile.name]
     if language and language != "auto":
         command += ["--language", language]
+    if cast.strip():
+        command += ["--cast", cast.strip()]
 
     def run() -> None:
         child = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE,
@@ -158,7 +160,31 @@ def start_job(video: bytes, filename: str, language: str) -> str:
         for line in child.stdout:
             LOGS[job_id].append(line.rstrip())
             del LOGS[job_id][:-40]  # keep the tail bounded
-        child.wait()
+        code = child.wait()
+
+        # The pipeline records its own error for anything it anticipates, but
+        # it cannot record what it did not survive — a failure outside a stage's
+        # try block, an import error, a kill. Whatever the cause, a dead child
+        # with nothing written would leave the page polling for ever. Treat a
+        # non-zero exit as the last word and put the reason where the UI reads
+        # it, so this can never hang again regardless of how the run died.
+        status_path = job / "status.json"
+        status = read_json(status_path, default={}) or {}
+        if code != 0 and not status.get("error"):
+            tail = [line for line in LOGS.get(job_id, []) if line.strip()]
+            # The runner indents progress and prints failures flush-left, so
+            # the unindented run at the end IS the message meant for a human.
+            message: list[str] = []
+            for line in reversed(tail):
+                if line[:1].isspace():
+                    if message:
+                        break
+                    continue
+                message.insert(0, line)
+            status["error"] = ("\n".join(message) or "\n".join(tail[-4:])
+                               or f"the run exited with code {code}")
+            status["stage"] = status.get("stage") or "failed"
+            status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2))
 
     threading.Thread(target=run, daemon=True).start()
     return job_id
@@ -185,6 +211,7 @@ def job_state(job_id: str) -> dict | None:
         "gaps": read_json(job / "gaps.json", default=[]) or [],
         "segments": read_json(job / "segments.json", default=[]) or [],
         "narration": read_json(job / "narration.json", default=[]) or [],
+        "cast": read_json(job / "cast.json", default={}) or {},
         "video": f"/jobs/{job_id}/output.mp4" if (job / "output.mp4").is_file() else None,
         "log": LOGS.get(job_id, [])[-14:],
     }
@@ -227,6 +254,11 @@ def start_script(pdf: bytes, filename: str, language: str) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
+    # Browsers request MP4s in byte ranges to read metadata first, then stream
+    # and seek. The BaseHTTPRequestHandler default is HTTP/1.0, which leaves a
+    # valid output.mp4 looking like a zero-duration blank player in Chrome.
+    protocol_version = "HTTP/1.1"
+
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -237,6 +269,50 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_json(self, code: int, payload: dict) -> None:
         self._send(code, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
+
+    def _send_video(self, path: Path) -> None:
+        """Stream one MP4, including the single byte range browsers request."""
+        size = path.stat().st_size
+        start, end = 0, size - 1
+        requested = self.headers.get("Range")
+        if requested:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", requested.strip())
+            if not match:
+                self.send_error(416, "invalid byte range")
+                return
+            first, last = match.groups()
+            if first:
+                start = int(first)
+                end = int(last) if last else end
+            elif last:
+                suffix = int(last)
+                start = max(0, size - suffix)
+            else:
+                self.send_error(416, "invalid byte range")
+                return
+            if start >= size or end < start:
+                self.send_error(416, "range not satisfiable")
+                return
+            end = min(end, size - 1)
+
+        length = end - start + 1
+        self.send_response(206 if requested else 200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(length))
+        if requested:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        with path.open("rb") as handle:
+            handle.seek(start)
+            remaining = length
+            while remaining:
+                block = handle.read(min(64 * 1024, remaining))
+                if not block:
+                    break
+                self.wfile.write(block)
+                remaining -= len(block)
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
         path = self.path.split("?")[0]
@@ -257,7 +333,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 2 and JOB_ID.match(parts[0]) and parts[1] == "output.mp4":
                 video = (get_profile("dev").jobs_root / parts[0] / "output.mp4").resolve()
                 if video.is_file():
-                    self._send(200, video.read_bytes(), "video/mp4")
+                    self._send_video(video)
                     return
             self._send(404, b"not found", "text/plain")
             return
@@ -288,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/describe":
             if not 0 < length <= MAX_VIDEO:
-                self._send_json(413, {"error": "video too large — trim it to 29s"})
+                self._send_json(413, {"error": "video too large — keep it under 120 MB"})
                 return
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             try:
@@ -296,6 +372,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.rfile.read(length),
                     query.get("name", ["clip.mp4"])[0],
                     query.get("language", ["auto"])[0],
+                    query.get("cast", [""])[0],
                 )
                 self._send_json(200, {"job": job_id})
             except Exception as exc:

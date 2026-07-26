@@ -62,13 +62,63 @@ DURATION_TOLERANCE = 0.05  # output must preserve source duration within this
 # seconds" the model returned a line that rendered in 6.23s, because seconds
 # mean nothing to it. Characters it can count.
 #
-# Latin script carries fewer sounds per character than an Indic abugida, so
-# English runs further per character. Anything unmeasured takes the slower
-# Indic rate — under-filling a window is recoverable, overrunning it is not.
-SPEECH_RATES: dict[str, float] = {"en-IN": 14.0}
+# We guessed Indic script would run *slower* per character than Latin, on the
+# theory that an abugida packs more sound into each character. Measurement says
+# the opposite, and the guess cost us a third of every Hindi window:
+#
+#   chars   duration   chars/s
+#      53     3.56s      14.89     hi-IN, pace 1.05, speaker anand
+#      85     5.26s      16.17
+#     107     7.29s      14.67
+#     109     7.28s      14.96
+#
+# Devanagari matras, nuktas and viramas are separate codepoints that carry no
+# duration of their own, so "दरवाज़े" is seven characters but three syllables.
+# Per character, Hindi therefore runs *further* than English, not less far.
+# Rates are measured on lines of 50+ characters: a short line is dominated by
+# fixed lead-in and lead-out silence and reads artificially slow (a 37-char
+# line clocked 17.68 chars/s), which would over-budget exactly the short gaps
+# that have the least room to recover.
+SPEECH_RATES: dict[str, float] = {"en-IN": 14.0, "hi-IN": 15.0}
+# Anything still unmeasured keeps the cautious rate — under-filling a window is
+# recoverable, overrunning it is not. Both languages we have measured came in
+# at 14–15, so this is deliberately pessimistic rather than an estimate.
 DEFAULT_SPEECH_RATE = 11.0
 # Aim short of the brim so the fit loop has room to re-pace instead of skip.
 BUDGET_MARGIN = 0.9
+
+
+# --------------------------------------------------------------------------
+# Bulbul v3 limits — probed against the live API, not taken from the docs.
+# The published docs claim temperature runs to 2.0; the API rejects anything
+# above 1.0. pitch and loudness are v2-only and return HTTP 400 on v3.
+# --------------------------------------------------------------------------
+TTS_PACE_MIN, TTS_PACE_MAX = 0.5, 2.0
+TTS_TEMPERATURE_MIN, TTS_TEMPERATURE_MAX = 0.01, 1.0
+BASE_TTS_PACE = 1.05
+
+# Measured pace sweep on a 126-character English line, live:
+#
+#   pace   duration   chars/s   speed-up vs 1.05   efficiency
+#   1.05     6.64s      18.96         1.00x          100%
+#   1.25     5.31s      23.74         1.25x          105%
+#   1.35     5.40s      23.33         1.23x           96%
+#   1.40     4.86s      25.93         1.37x          103%
+#   1.50     4.60s      27.41         1.45x          101%
+#
+# Two things follow. Delivery scales essentially linearly to 1.5 with no
+# plateau, so a faster tone really does buy proportionally more content — the
+# char_budget scaling is sound. But Bulbul is not monotonic at fine grain:
+# 1.25 and 1.30 rendered identically and 1.35 came out *slower* than 1.30.
+# Pace steps below ~0.10 are inside that noise, so tone deltas are spaced
+# wider than that or they are not really distinct.
+#
+# The ceiling that matters is not the API's 2.0 but speak.py's MAX_PACE (1.5),
+# where the fit loop gives up and starts shortening. A tone opening at 1.40
+# leaves the loop only 7% room to re-pace before it must cut words; at 1.35 it
+# has 11%. That is why the fastest tone stops at 1.35 rather than 1.40 — the
+# last 0.05 buys ~2% more content and costs a third of the recovery margin.
+MAX_TONE_PACE = 1.35
 
 
 def speech_rate(language: str | None) -> float:
@@ -76,9 +126,146 @@ def speech_rate(language: str | None) -> float:
     return SPEECH_RATES.get(language or "", DEFAULT_SPEECH_RATE)
 
 
-def char_budget(seconds: float, language: str | None) -> int:
-    """How many characters of `language` fit in `seconds` of window."""
-    return max(0, int(seconds * speech_rate(language) * BUDGET_MARGIN))
+def char_budget(
+    seconds: float, language: str | None, pace: float = BASE_TTS_PACE
+) -> int:
+    """How many characters of `language` fit in `seconds` of window.
+
+    SPEECH_RATES were measured at pace 1.05, and delivery scales close enough
+    to linearly with pace that a slower tone must be given a smaller budget.
+    Omit `pace` and you get the pre-tone behaviour exactly.
+    """
+    scale = max(TTS_PACE_MIN, min(TTS_PACE_MAX, pace)) / BASE_TTS_PACE
+    return max(0, int(seconds * speech_rate(language) * scale * BUDGET_MARGIN))
+
+
+# --------------------------------------------------------------------------
+# Tone presets
+# --------------------------------------------------------------------------
+#
+# Bulbul v3 has NO emotion, style, pitch or loudness control — probed against
+# the live API. The only knobs are pace, temperature and speaker. Swapping
+# speaker changes who is talking, not how, which is why voice-hopping alone
+# sounded flat.
+#
+# So expressivity is mostly a WRITING problem. Bulbul infers prosody from
+# lexical and punctuation cues: measured on the same content, "A woman looks
+# out of the window at the rain" renders in 2.56s, while "She watches the rain
+# streak the glass... quietly, for a long moment" renders in 3.93s with a
+# visibly different dynamic profile. The em-dash, the ellipsis and the clause
+# structure did that, not a parameter.
+#
+# Each preset therefore carries both halves:
+#   register     the writing instruction — the part that actually carries tone
+#   pace_delta   added to BASE_TTS_PACE; NEVER NEGATIVE, see below
+#   temperature  0.01–1.0; Sarvam's own default is 0.6
+#
+# WHY NO TONE EVER SLOWS THE PACE
+# -------------------------------
+# Gap space is the scarcest resource in this product, and char_budget scales
+# with pace. Dropping to 0.87 for a somber line would cost ~17% of what we are
+# able to say in that window — shorter lines, more shortening, more skips. That
+# trades information a blind viewer cannot get anywhere else for a mood effect.
+# The fit loop also only ever raises pace, so starting below base fights it.
+#
+# A slow *feeling* comes from punctuation instead: an ellipsis or a hard full
+# stop buys a pause exactly where it earns one, rather than stretching every
+# syllable. Same seconds, far better spent. So quiet tones hold base pace and
+# do their work through temperature and register.
+#
+# Deliberately modulated rather than theatrical. Professional audio-description
+# practice favours a narrator who does not compete with the film's own score,
+# and an over-acted describer reads as patronising. Energy follows the scene;
+# the voice stays trustworthy.
+
+
+@dataclass(frozen=True)
+class Tone:
+    name: str
+    pace_delta: float
+    temperature: float
+    register: str
+
+
+NEUTRAL_TONE = "neutral"
+
+TONE_PRESETS: dict[str, Tone] = {
+    "neutral": Tone(
+        "neutral", 0.00, 0.70,
+        "Plain, even description. Say what is there and stop.",
+    ),
+    "tense": Tone(
+        "tense", 0.20, 0.90,
+        "Short clauses. Hard full stops. No adjectives that soften. "
+        "Let the shortness carry the pressure.",
+    ),
+    "energetic": Tone(
+        "energetic", 0.30, 0.90,
+        "Active verbs, present tense, one clause running into the next. "
+        "Keep it moving; never pause to qualify.",
+    ),
+    # Only +0.10: comedy timing lives in the pause before the payoff, which the
+    # register buys with punctuation. Rushing a joke kills it.
+    "playful": Tone(
+        "playful", 0.10, 1.00,
+        "Set it up, then land it — a comma or dash before the payoff. "
+        "Understate the joke; never explain it.",
+    ),
+    # gentle and somber hold base pace on purpose — they slow the ear with
+    # punctuation, not by stretching every syllable. See the note above.
+    "gentle": Tone(
+        "gentle", 0.00, 0.75,
+        "Longer, unhurried phrasing. Use an ellipsis where a breath belongs, "
+        "so the pause is written rather than drawled. Warm, never sentimental.",
+    ),
+    "somber": Tone(
+        "somber", 0.00, 0.55,
+        "Spare and still. Short declaratives separated by hard full stops — "
+        "the stops do the slowing. No flourish, no adjectives of feeling.",
+    ),
+}
+
+TONES: frozenset[str] = frozenset(TONE_PRESETS)
+
+
+def normalize_tone(value: str | None) -> str:
+    """Map anything to a known tone. Unrecognised input becomes neutral.
+
+    A model picking its own label must never be able to fail the run — a
+    surprising tone is a small cosmetic loss, a crash is a demo.
+    """
+    if not value:
+        return NEUTRAL_TONE
+    candidate = str(value).strip().lower()
+    return candidate if candidate in TONE_PRESETS else NEUTRAL_TONE
+
+
+def tone_params(
+    tone: str | None, base_pace: float = BASE_TTS_PACE
+) -> tuple[float, float]:
+    """Return (pace, temperature) for a tone, clamped to what the API accepts."""
+    preset = TONE_PRESETS[normalize_tone(tone)]
+    pace = max(TTS_PACE_MIN, min(TTS_PACE_MAX, base_pace + preset.pace_delta))
+    temperature = max(
+        TTS_TEMPERATURE_MIN, min(TTS_TEMPERATURE_MAX, preset.temperature)
+    )
+    return round(pace, 3), round(temperature, 3)
+
+
+def tone_register(tone: str | None) -> str:
+    """The writing instruction for a tone — for the narrate prompt."""
+    return TONE_PRESETS[normalize_tone(tone)].register
+
+
+def tone_char_budget(seconds: float, language: str | None, tone: str | None) -> int:
+    """Character budget adjusted for the pace this tone will actually use.
+
+    A gentle line is spoken slower, so fewer characters fit in the same window.
+    Budgeting at the base pace would send the fit loop into shorten-or-skip on
+    exactly the lines we most want to hear.
+    """
+    pace, _ = tone_params(tone)
+    return char_budget(seconds, language, pace)
 
 
 @dataclass(frozen=True)
@@ -202,6 +389,14 @@ def verify_job(job: Path, cfg: dict, *, complete: bool = True) -> list[str]:
             text = (item.get("text") or "").strip()
             if not text:
                 problems.append(f"{label}: empty narration text")
+
+            # Optional field: only assert on it once a run actually carries one.
+            raw_tone = item.get("tone")
+            if raw_tone is not None and str(raw_tone).strip().lower() not in TONES:
+                problems.append(
+                    f"{label}: tone {raw_tone!r} is not one of "
+                    f"{', '.join(sorted(TONES))}"
+                )
 
             item_language = item.get("language") or output_language
             if output_language and item_language != output_language:

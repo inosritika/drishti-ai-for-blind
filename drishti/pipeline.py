@@ -112,6 +112,7 @@ STAGES: list[Stage] = [
     Stage("gaps", "gaps", "detect", "Nishant",
           ["gaps.json", "chunks.json", "transcript.txt", "language.json"]),
     Stage("scenes", "scenes", "understand", "Ritika", ["scenes.json"]),
+    Stage("cast", "cast", "bind", "Aryan", ["cast.json"]),
     Stage("align", "align", "plan", "Aryan", ["segments.json"]),
     Stage("narrate", "narrate", "write", "Tanishq", ["narration.json"],
           done=_narration_written),
@@ -271,6 +272,13 @@ def run(job: Path, cfg: dict, profile: Profile, force: set[str] | None = None) -
                 f"To keep moving, copy a known-good {' or '.join(stage.outputs) or 'output'} "
                 f"into {job}/ and rerun; the runner will skip the stage."
             ) from None
+        except SystemExit as exc:
+            # Stages use SystemExit for expected input/configuration failures.
+            # It is not an Exception, so record it before the web subprocess
+            # exits; otherwise the UI keeps polling with no error to show.
+            detail = str(exc).strip() or f"stage exited with code {exc.code}"
+            status.set(error=f"{stage.name}: {detail}", stage=stage.name)
+            raise
         except Exception as exc:  # noqa: BLE001 - surface any stage failure cleanly
             status.set(error=f"{stage.name}: {exc}", stage=stage.name)
             raise
@@ -315,6 +323,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--speaker", default="anand")
     parser.add_argument("--pace", type=float, default=1.05)
     parser.add_argument("--max-segments", type=int, default=4)
+    parser.add_argument("--cast", default="",
+                        help="character names present, e.g. \"Mr Bean\". Free text is\naccepted — a pasted cast list or synopsis works too. Names come only from\nhere: the model is never allowed to invent one.")
     parser.add_argument("--chunk-seconds", type=float, default=1.5)
     parser.add_argument("--min-gap", type=float, default=1.6)
     parser.add_argument("--edge-padding", type=float, default=0.15)
@@ -334,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         "speaker": args.speaker,
         "pace": args.pace,
         "max_segments": args.max_segments,
+        "cast": args.cast,
         "chunk_seconds": args.chunk_seconds,
         "min_gap": args.min_gap,
         "edge_padding": args.edge_padding,

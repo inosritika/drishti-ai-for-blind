@@ -17,7 +17,8 @@ has_audio_stream):
     It does not remove background music and must never be used to fight music.
   - if the source has no audio stream, synthesise a silent track of the same
     duration (anullsrc) so downstream stages have something to read
-  - Saaras REST rejects clips over ~29.5s: raise a clear error above that
+  - every Saaras REST request stays below its 30-second limit: `gaps.py`
+    sends 1.5-second WAV chunks, so source videos can be longer
 
 Two notes on why this file looks the way it does:
 
@@ -44,9 +45,10 @@ from pathlib import Path
 
 from .common import has_stream, log, media_duration, require_binary, run, write_json
 
-# Saaras REST refuses anything longer. Fail here, in two seconds, rather than
-# after twenty chunk uploads.
-DEFAULT_MAX_DURATION = 29.5
+# Saaras's 30-second REST limit applies to each STT request, not the source
+# video. `gaps.py` splits audio into 1.5-second requests, so longer videos
+# remain valid while keeping the public UI bounded and predictable.
+DEFAULT_MAX_DURATION = 162.0
 
 # Room hiss only. Raising these to fight background music defeats the entire
 # premise of the project — see the module docstring.
@@ -215,7 +217,7 @@ def prepare(job: Path, cfg: dict) -> None:
 
     cfg keys used: denoise (bool, default True), highpass_hz, afftdn_nf,
                    audio_filter (raw -af string, overrides the two above),
-                   max_duration (default 29.5)
+                   max_duration (default 162)
     """
     job = Path(job)
     source = job / "input.mp4"
@@ -229,8 +231,9 @@ def prepare(job: Path, cfg: dict) -> None:
     max_duration = _float_setting(cfg, "max_duration", "DRISHTI_MAX_DURATION", DEFAULT_MAX_DURATION)
     if duration > max_duration:
         raise SystemExit(
-            f"{source.name} is {duration:.2f}s. Saaras REST rejects clips over "
-            f"{max_duration:.1f}s — trim it, or raise max_duration if you know why."
+            f"{source.name} is {duration:.2f}s, above DRISHTI's "
+            f"{max_duration:.1f}s source-video limit — trim it or raise "
+            "DRISHTI_MAX_DURATION if you know why."
         )
 
     has_audio = has_stream(source, "a")
