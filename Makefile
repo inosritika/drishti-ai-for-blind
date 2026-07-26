@@ -30,8 +30,8 @@ fixture:
 api:
 	python3 -m uvicorn api.main:app --reload --port 8000
 
-web:  # static on purpose — no build step, nothing the venue wifi can break
-	cd web && python3 -m http.server 8080
+web:  # stdlib server: static page + Saaras proxy for voice input, no build step
+	python3 web/serve.py
 
 dev:
 	@echo "run 'make api' and 'make web' in two terminals"
