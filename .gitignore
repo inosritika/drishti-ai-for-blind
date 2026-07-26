@@ -5,6 +5,9 @@ runs/
 # secrets
 .env
 
+# local working notes, not shared
+IMPLEMENTATION_ARYAN.md
+
 # media (locked demo clips and fallback MP4s live on the demo laptop)
 *.mp4
 *.mov
