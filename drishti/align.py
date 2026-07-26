@@ -83,8 +83,60 @@ LOOKAHEAD = 1.0
 AMPLE_WINDOW = 6.0
 
 
+# Articles to swallow when a descriptor becomes a name, so "a suited man
+# stands" becomes "Mr Bean stands" and never "a Mr Bean stands".
+_ARTICLE = re.compile(r"\b(?:a|an|the)\s+$", re.IGNORECASE)
+
+
 def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
     return max(0.0, min(a_end, b_end) - max(a_start, b_start))
+
+
+def apply_cast(beats: list[dict[str, Any]], bindings: dict[str, str]) -> list[dict[str, Any]]:
+    """Replace bound descriptors with character names, in text and entities.
+
+    Pure and reversible: the original wording is kept on the beat as
+    `event_described`, so the UI can show what was seen versus what will be
+    said, and a bad binding is visible rather than silently baked in.
+
+    Longest descriptor first — binding both "suited man" and "man" must not let
+    the shorter one match inside the longer one and produce "suited Mr Bean".
+    """
+    if not bindings:
+        return beats
+
+    ordered = sorted(bindings.items(), key=lambda item: -len(item[0]))
+    # Swallow the article in the same pass as the descriptor: "A suited man" is
+    # one match, replaced by "Mr Bean". Doing it in two passes would need to
+    # know which names came from a substitution and which were always there.
+    patterns = [
+        (re.compile(r"\b(?:a|an|the)\s+" + re.escape(descriptor) + r"\b", re.IGNORECASE),
+         re.compile(r"\b" + re.escape(descriptor) + r"\b", re.IGNORECASE),
+         name)
+        for descriptor, name in ordered
+    ]
+
+    def rename(text: str) -> str:
+        for with_article, bare, name in patterns:
+            text = with_article.sub(name, text)
+            text = bare.sub(name, text)
+        return text
+
+    renamed: list[dict[str, Any]] = []
+    for beat in beats:
+        event = str(beat.get("event") or "")
+        entities = [str(entity) for entity in (beat.get("entities") or [])]
+        new_event = rename(event)
+        new_entities = [rename(entity) for entity in entities]
+        if new_event == event and new_entities == entities:
+            renamed.append(beat)
+            continue
+        copy = dict(beat)
+        copy["event_described"] = event  # what was actually seen
+        copy["event"] = new_event
+        copy["entities"] = new_entities
+        renamed.append(copy)
+    return renamed
 
 
 def _placement(
