@@ -575,7 +575,10 @@
     }
     resultMeta.textContent = bits.join(" · ");
 
-    if (state.video) loadCompletedVideo(state.video);
+    // ffmpeg creates output.mp4 while the final mix is still running. Do not
+    // cache that incomplete file in the player; wait for the pipeline's
+    // explicit completion signal, then fetch the finished bytes once.
+    if (state.stage === "done" && state.video) loadCompletedVideo(state.video);
 
     // Facts: the numbers that show this was measured, not guessed.
     facts.replaceChildren();
