@@ -419,6 +419,32 @@
   const form = document.getElementById("describe-form");
   const status = document.getElementById("status");
 
+  // Vercel hosts this static page; the real pipeline runs on the demo laptop.
+  // Give the shared Vercel link a current tunnel at runtime, for example:
+  //   https://<vercel-site>/?backend=https%3A%2F%2F<id>.ngrok-free.app
+  // Keeping this in the URL means switching laptops never needs a redeploy.
+  function backendUrl() {
+    const raw = new URLSearchParams(window.location.search).get("backend");
+    if (!raw) return "";
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol !== "https:") throw new Error("backend must use HTTPS");
+      return parsed.href.replace(/\/$/, "");
+    } catch (_) {
+      return "";
+    }
+  }
+
+  const BACKEND_URL = backendUrl();
+  const DEPLOYED_ON_VERCEL = window.location.hostname.endsWith(".vercel.app");
+  function apiUrl(path) { return BACKEND_URL ? BACKEND_URL + path : path; }
+  function needsBackend() {
+    if (!DEPLOYED_ON_VERCEL || BACKEND_URL) return false;
+    status.textContent = "This public UI needs the current laptop backend URL. " +
+      "Open the shared link with ?backend=https%3A%2F%2Fyour-ngrok-url.";
+    return true;
+  }
+
   clip.addEventListener("change", () => {
     if (clip.files.length) {
       const f = clip.files[0];
@@ -484,7 +510,7 @@
     resultMeta.textContent = bits.join(" · ");
 
     if (state.video && player.getAttribute("src") !== state.video) {
-      player.src = state.video;
+      player.src = apiUrl(state.video);
       player.hidden = false;
       // Setting src alone left Chrome's media element in NETWORK_EMPTY on the
       // completed-job view. Start the load explicitly so metadata, duration,
@@ -541,7 +567,7 @@
   }
 
   function poll(jobId) {
-    fetch("/api/job/" + jobId).then((r) => r.json()).then((state) => {
+    fetch(apiUrl("/api/job/" + jobId)).then((r) => r.json()).then((state) => {
       if (state.error && !state.stage) { barLabel.textContent = state.error; return; }
       render(state);
       if (state.stage === "done") {
@@ -557,6 +583,7 @@
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+    if (needsBackend()) return;
     if (!clip.files.length) {
       status.textContent = "Choose a video first — press U to jump to the file picker.";
       clip.focus();
@@ -574,7 +601,7 @@
     const query = "?name=" + encodeURIComponent(file.name) +
                   "&language=" + encodeURIComponent(language.value) +
                   "&cast=" + encodeURIComponent(cast.value.trim());
-    fetch("/api/describe" + query, { method: "POST", body: file })
+    fetch(apiUrl("/api/describe") + query, { method: "POST", body: file })
       .then((r) => r.json())
       .then((started) => {
         if (!started.job) throw new Error(started.error || "could not start");
@@ -663,8 +690,9 @@
     let at = 0;
     for (const chunk of samples) { joined.set(chunk, at); at += chunk.length; }
 
+    if (needsBackend()) return;
     announce("Heard you — asking Saaras…");
-    fetch("/api/hear", { method: "POST", headers: { "Content-Type": "audio/wav" },
+    fetch(apiUrl("/api/hear"), { method: "POST", headers: { "Content-Type": "audio/wav" },
                          body: encodeWav(joined, sampleRate) })
       .then((r) => r.json())
       .then((result) => {

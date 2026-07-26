@@ -51,6 +51,8 @@ from drishti.config import get_profile, new_job, normalize_language  # noqa: E40
 PORT = 8080
 MAX_AUDIO = 4 * 1024 * 1024    # a few seconds of 16kHz mono WAV is ~100KB
 MAX_VIDEO = 120 * 1024 * 1024  # two minutes of typical 720p fits comfortably
+VERCEL_UI_ORIGIN = "https://web-eight-weld-gdhwcvkunv.vercel.app"
+LOCAL_UI_ORIGINS = {"http://127.0.0.1:8080", "http://localhost:8080"}
 
 JOB_ID = re.compile(r"^[0-9]{8}_[0-9]{6}_[a-z0-9-]+$")
 # Job id -> tail of the child's stdout, so a failed run can explain itself.
@@ -186,6 +188,17 @@ class Handler(BaseHTTPRequestHandler):
     # valid output.mp4 looking like a zero-duration blank player in Chrome.
     protocol_version = "HTTP/1.1"
 
+    def end_headers(self) -> None:
+        """Permit the deployed UI to call this laptop through an HTTPS tunnel."""
+        origin = self.headers.get("Origin")
+        if origin in LOCAL_UI_ORIGINS or origin == VERCEL_UI_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Range")
+            self.send_header("Access-Control-Expose-Headers", "Accept-Ranges, Content-Range")
+            self.send_header("Vary", "Origin")
+        super().end_headers()
+
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -240,6 +253,11 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(block)
                 remaining -= len(block)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
         path = self.path.split("?")[0]
