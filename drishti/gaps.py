@@ -65,6 +65,7 @@ import argparse
 import os
 import re
 import tempfile
+import time
 import unicodedata
 import wave
 from concurrent.futures import ThreadPoolExecutor
@@ -98,6 +99,18 @@ MIN_SPEECH_CHUNKS = 2      # one confident chunk is not evidence
 MIN_CONFIDENCE = 0.70      # mean language_probability of the dominant language
 MIN_DOMINANCE = 0.60       # dominant language's share of spoken seconds
 TIE_MARGIN = 0.05          # closer than this to the runner-up is a tie, not a winner
+
+# How much of a second language makes a clip genuinely code-switched. Measured
+# on real footage: a 194s English clip reported 3s of Hindi (2%) and another
+# reported 3s Hindi plus 1.5s Gujarati (6%). Both are single-language clips with
+# a stray exclamation, so "more than one language appeared" is not a usable
+# signal — the runner-up has to be a real share of the dialogue.
+CODE_SWITCH_SHARE = 0.15
+
+# Sarvam rate-limits sustained chunk uploads. common.py retries 429s three times
+# over ~6s, which a 130-chunk clip blows straight through.
+RATE_LIMIT_RETRIES = 4
+RATE_LIMIT_BACKOFF = 5.0
 
 # Transcribed junk that means "I heard music", not "I heard speech".
 _JUNK = {"", "-", "--", "...", "…", "♪", "♪♪", "[music]", "(music)", "[music]."}
@@ -213,19 +226,39 @@ def _first(payload: dict, *names: str):
     return None
 
 
+def _stt_with_backoff(path: Path) -> dict:
+    """One Saaras call, surviving sustained rate limiting.
+
+    common.py already retries 429s, but only three times over about six
+    seconds. A long clip sends far more chunks than that budget covers, and
+    losing the stage means re-running everything not yet cached.
+    """
+    for attempt in range(1, RATE_LIMIT_RETRIES + 1):
+        try:
+            return http_multipart(
+                STT_URL,
+                {"model": STT_MODEL, "language_code": "unknown"},
+                "file",
+                path,
+                {"api-subscription-key": env_key("SARVAM_API_KEY")},
+                cache_ns="saaras_stt",
+            )
+        except RuntimeError as exc:
+            rate_limited = "429" in str(exc) or "rate_limit" in str(exc).lower()
+            if not rate_limited or attempt == RATE_LIMIT_RETRIES:
+                raise
+            wait = RATE_LIMIT_BACKOFF * attempt
+            log(f"  rate limited, waiting {wait:.0f}s (attempt {attempt}/{RATE_LIMIT_RETRIES})")
+            time.sleep(wait)
+    raise AssertionError("unreachable")
+
+
 def transcribe_chunk(chunk: dict, workdir: Path) -> dict:
     """One Saaras call. Cached on the chunk's bytes, so reruns are free."""
     path = workdir / f"chunk_{chunk['index']:03d}.wav"
     _write_chunk_wav(chunk, path)
 
-    response = http_multipart(
-        STT_URL,
-        {"model": STT_MODEL, "language_code": "unknown"},
-        "file",
-        path,
-        {"api-subscription-key": env_key("SARVAM_API_KEY")},
-        cache_ns="saaras_stt",
-    )
+    response = _stt_with_backoff(path)
 
     transcript = (_first(response, "transcript", "text") or "").strip()
     raw_language = _first(response, "language_code", "detected_language", "language")
@@ -368,9 +401,9 @@ def detect_language(chunks: list[dict]) -> dict:
     confidence = round(weighted[top_code] / top_seconds, 3) if top_seconds else 0.0
 
     runner_up_share = (ranked[1][1] / total) if len(ranked) > 1 else 0.0
-    code_switched = len(ranked) > 1 and (share - runner_up_share) <= TIE_MARGIN
+    tied = len(ranked) > 1 and (share - runner_up_share) <= TIE_MARGIN
 
-    if code_switched:
+    if tied:
         # A genuine tie. Report both languages and let pipeline.py decide the
         # policy — a guess written here would sail past verify_job, because it
         # only checks that source and output agree.
@@ -387,7 +420,8 @@ def detect_language(chunks: list[dict]) -> dict:
         "source_language": top_code,
         "confidence": confidence,
         "evidence": evidence,
-        "code_switched": len(ranked) > 1,
+        # Genuinely mixed dialogue, not one stray exclamation.
+        "code_switched": runner_up_share >= CODE_SWITCH_SHARE,
     }
 
 
