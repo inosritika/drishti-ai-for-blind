@@ -258,7 +258,26 @@ def _user_prompt(segment: dict, transcript: str, char_budget: int) -> str:
             "surrounding beats without padding."
         )
 
+    # Characters a human named, as {name: visual description}. align has
+    # already substituted the name wherever it could match the wording
+    # mechanically; this covers the rest — "the man in the bowler hat", a
+    # phrasing no pattern anticipated, or prose in another language. The model
+    # links description to phrasing, which is the part it is actually good at.
+    cast = segment.get("cast") or {}
+    cast_note = ""
+    if cast:
+        rows = "\n".join(f"  - {name}: {description}"
+                         for name, description in cast.items())
+        cast_note = (
+            "\n\nA viewer told us who is in this clip:\n" + rows + "\n"
+            "When a beat refers to one of these people, use the NAME rather "
+            "than describing them again. Introduce a name with a brief "
+            "description the first time only. Anyone NOT listed keeps their "
+            "description — never invent or guess a name for them.\n"
+        )
+
     return (
+        f"{cast_note}"
         f"Character budget: return between {floor} and {char_budget} characters. "
         f"Aim close to {char_budget} when there is more than one beat worth "
         "mentioning — the listener wants coverage, not brevity for its own sake. "
