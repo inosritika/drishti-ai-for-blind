@@ -11,15 +11,16 @@ key, and it must never ship inside page JavaScript. This keeps the key in
                                               "transcript": str, "heard": str}
     POST /api/describe  body: video/*    ->  {"job": "<id>"}
     GET  /api/job/<id>                   ->  status.json + narration + segments
-    POST /api/script    body: application/pdf -> {"script": "<id>"}
-    GET  /api/script/<id>                ->  {"state", "text", "pages", …}
+    POST /api/script       body: pdf/image   ->  {"script": "<id>"}
+    POST /api/script-text  body: text/plain  ->  {"script": "<id>"} (instant)
+    GET  /api/script/<id>                    ->  {"state", "text", "pages", …}
 
 `script` is a SEPARATE pathway, not a pipeline stage: a screenplay PDF (or a
 page photo) goes to Sarvam Document Intelligence and the written script comes
-back as text on disk. If the page sends a parsed script id along with describe
-AND DRISHTI_SCRIPT_CONTEXT=1 is set, the text is handed to the pipeline as
-background context for scene understanding; with the flag off (the default)
-the id is ignored and describe behaves exactly as before.
+back as text on disk. Pasted text skips the API entirely. Adding a script is
+itself the opt-in — when the page sends its id along with describe, the text
+reaches scene understanding as background context. DRISHTI_SCRIPT_CONTEXT=0
+opts out. Users who add no script are unaffected either way.
 
 `describe` runs the real pipeline as a SUBPROCESS, never in-process: a stage
 that dies must not take the server with it, and the child's stdout is the log
@@ -55,7 +56,7 @@ WEB_ROOT = Path(__file__).resolve().parent
 REPO = WEB_ROOT.parent
 sys.path.insert(0, str(REPO))
 
-from drishti.common import SARVAM_BASE_URL, env_key, http_multipart, read_json  # noqa: E402
+from drishti.common import SARVAM_BASE_URL, env_key, http_multipart, read_json, write_json  # noqa: E402
 from drishti.config import get_profile, new_job, normalize_language  # noqa: E402
 from drishti.script_doc import extract_script  # noqa: E402
 
@@ -63,6 +64,7 @@ PORT = 8080
 MAX_AUDIO = 4 * 1024 * 1024    # a few seconds of 16kHz mono WAV is ~100KB
 MAX_VIDEO = 120 * 1024 * 1024  # two minutes of typical 720p fits comfortably
 MAX_PDF = 25 * 1024 * 1024     # ten pages of a screenplay is well under 1MB
+MAX_TEXT = 256 * 1024          # pasted script text; scenes truncates to ~6k chars anyway
 
 JOB_ID = re.compile(r"^[0-9]{8}_[0-9]{6}_[a-z0-9-]+$")
 # Job id -> tail of the child's stdout, so a failed run can explain itself.
@@ -137,8 +139,14 @@ def hear(wav_bytes: bytes) -> dict:
 
 
 def script_context_enabled() -> bool:
-    """Feature flag for script-as-context. Off by default, everywhere."""
-    return os.getenv("DRISHTI_SCRIPT_CONTEXT", "").strip().lower() in {"1", "true", "yes", "on"}
+    """Whether a script the user gave us may reach the scene-understanding call.
+
+    Default yes: adding a script in the UI is a deliberate act, and it would be
+    strange to accept one and then ignore it. DRISHTI_SCRIPT_CONTEXT=0 is the
+    explicit opt-out — the script still feeds `cast`, just not the vision prompt.
+    Users who add no script are unaffected either way.
+    """
+    return os.getenv("DRISHTI_SCRIPT_CONTEXT", "").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def start_job(video: bytes, filename: str, language: str, cast: str = "",
@@ -164,9 +172,9 @@ def start_job(video: bytes, filename: str, language: str, cast: str = "",
     if cast.strip():
         command += ["--cast", cast.strip()]
 
-    # A parsed script rides along only when the feature flag says so. The id is
-    # validated against the same shape as job ids and must resolve to a file we
-    # wrote — never a path from the client.
+    # A script the page accepted rides along unless DRISHTI_SCRIPT_CONTEXT=0.
+    # The id is validated against the same shape as job ids and must resolve to
+    # a file we wrote — never a path from the client.
     if script_id and script_context_enabled():
         if JOB_ID.match(script_id):
             script_md = (SCRIPTS_ROOT / script_id / "script.md").resolve()
@@ -269,6 +277,28 @@ def start_script(pdf: bytes, filename: str, language: str) -> str:
             SCRIPTS[script_id] = {**SCRIPTS[script_id], "state": "error", "error": str(exc)}
 
     threading.Thread(target=run, daemon=True).start()
+    return script_id
+
+
+def save_script_text(text: str) -> str:
+    """Pasted script text — no Document Intelligence, no polling, done at once.
+
+    Written to the same runs/scripts/<id>/script.md layout as the parsed path,
+    so describe's --script handoff cannot tell the two apart.
+    """
+    from datetime import datetime
+
+    script_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_pasted"
+    out_dir = SCRIPTS_ROOT / script_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "script.md").write_text(text.strip() + "\n", encoding="utf-8")
+    write_json(out_dir / "script.json", {"source": "pasted", "characters": len(text.strip())})
+    SCRIPTS[script_id] = {
+        "state": "done",
+        "name": "pasted text",
+        "text": text.strip(),
+        "characters": len(text.strip()),
+    }
     return script_id
 
 
@@ -411,6 +441,20 @@ class Handler(BaseHTTPRequestHandler):
                     query.get("language", ["en-IN"])[0],
                 )
                 self._send_json(200, {"script": script_id})
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
+            return
+
+        if path == "/api/script-text":
+            if not 0 < length <= MAX_TEXT:
+                self._send_json(413, {"error": "text too large — 256KB maximum"})
+                return
+            text = self.rfile.read(length).decode("utf-8", "replace")
+            if not text.strip():
+                self._send_json(400, {"error": "the pasted script is empty"})
+                return
+            try:
+                self._send_json(200, {"script": save_script_text(text)})
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
             return

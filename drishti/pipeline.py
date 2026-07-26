@@ -326,7 +326,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cast", default="",
                         help="character names present, e.g. \"Mr Bean\". Free text is\naccepted — a pasted cast list or synopsis works too. Names come only from\nhere: the model is never allowed to invent one.")
     parser.add_argument("--script", type=Path, default=None,
-                        help="extracted script/synopsis text (e.g. runs/scripts/<id>/script.md).\nCopied into the job as script.md and passed to scene understanding as\nbackground context. Also enabled by DRISHTI_SCRIPT_CONTEXT=1 for jobs that\nalready contain a script.md. Off by default.")
+                        help="extracted script/synopsis text (e.g. runs/scripts/<id>/script.md).\nCopied into the job as script.md; supplying it is itself the opt-in, so scene\nunderstanding receives it as background context. Runs without --script are\nunaffected.")
+    parser.add_argument("--no-script-context", action="store_true",
+                        help="keep a supplied script OUT of the scene-understanding prompt.\nThe script is still copied in and still feeds the cast stage. Same as\nDRISHTI_SCRIPT_CONTEXT=0.")
     parser.add_argument("--chunk-seconds", type=float, default=1.5)
     parser.add_argument("--min-gap", type=float, default=1.6)
     parser.add_argument("--edge-padding", type=float, default=0.15)
@@ -378,10 +380,8 @@ def main(argv: list[str] | None = None) -> int:
 
     job = Path(args.job) if args.job else new_job(profile, args.clip, args.label)
 
-    # An explicit --script is unambiguous consent: copy the text in as the
-    # job-dir file scenes reads, and turn the feature on for this run. Without
-    # it, nothing here changes — scenes' own flag (env DRISHTI_SCRIPT_CONTEXT)
-    # stays off by default and decides for jobs that already hold a script.md.
+    # Copy a supplied script in as the job-dir file scenes reads. Supplying one
+    # is the opt-in, so nothing further is needed to enable the context.
     if args.script:
         source = Path(args.script)
         if not source.is_file():
@@ -389,6 +389,15 @@ def main(argv: list[str] | None = None) -> int:
         (job / "script.md").write_text(
             source.read_text(encoding="utf-8", errors="replace"), encoding="utf-8"
         )
+
+    # The two explicit intents, most specific first. --no-script-context wins
+    # over --script so "give the script to cast but not to the vision prompt"
+    # is expressible; a bare --script overrides a DRISHTI_SCRIPT_CONTEXT=0 in
+    # the environment, since naming a file on the command line is the more
+    # deliberate act.
+    if args.no_script_context:
+        cfg["use_script_context"] = False
+    elif args.script:
         cfg["use_script_context"] = True
 
     force = set(args.force)

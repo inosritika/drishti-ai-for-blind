@@ -77,11 +77,14 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "max_output_tokens": 6000,
     "reasoning_effort": "low",
     "prompt_version": "scene-beats-v4",
-    # Script context (OFF by default). When enabled AND job/script.md exists,
-    # its text is injected into the prompt as fenced background material — an
-    # identification aid, never a source of events. With the flag off (or no
-    # script.md) the prompt is byte-identical to before this feature existed.
-    "use_script_context": False,
+    # Script context. The real switch is whether job/script.md EXISTS — it only
+    # lands there when someone passed a script or synopsis, so supplying one is
+    # itself the opt-in and no separate ceremony is needed. This param is the
+    # explicit override for "I gave you a script, use it for cast only, keep it
+    # out of the vision prompt": set DRISHTI_SCRIPT_CONTEXT=0 or pass
+    # --no-script-context. With no script.md the prompt is byte-identical to
+    # before this feature existed, whatever this is set to.
+    "use_script_context": True,
     "script_context_max_chars": 6000,
 }
 
@@ -922,10 +925,12 @@ def understand(job: Path, cfg: dict[str, Any]) -> None:
     require_binary("ffmpeg")
     require_binary("ffprobe")
 
-    # Script context is opt-in twice over: the flag must be on AND the job must
-    # actually hold a script.md (written there by the pipeline's --script, from
-    # the script_doc pathway). Either one absent -> empty string -> the prompt
-    # is byte-identical to the pre-feature prompt.
+    # Passing a script IS the opt-in: job/script.md only exists when someone
+    # supplied one (pipeline --script, from the script_doc pathway or the UI).
+    # No script.md -> empty string -> the prompt is byte-identical to the
+    # pre-feature prompt, which is every run that does not use this feature.
+    # use_script_context is the explicit override for keeping a supplied script
+    # out of the vision prompt.
     script_context = ""
     if params["use_script_context"]:
         script_file = job / "script.md"
@@ -938,8 +943,8 @@ def understand(job: Path, cfg: dict[str, Any]) -> None:
                 f"  scenes: using script.md as background context "
                 f"({len(script_context)} chars)"
             )
-        else:
-            log("  scenes: script context enabled but no script.md in job — continuing without")
+    elif (job / "script.md").is_file():
+        log("  scenes: script.md present but script context is switched off — ignoring it")
 
     started = time.time()
     log(f"  scenes: input={video.name}, duration={duration:.3f}s")

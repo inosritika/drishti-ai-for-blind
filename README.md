@@ -106,14 +106,24 @@ can be a PDF, a photo of the pages (PNG/JPG), or a ZIP of page images. In the
 UI it is the “Have the script? Add it too” card — `POST /api/script`, then poll
 `GET /api/script/<id>`.
 
-**Feature flag — `DRISHTI_SCRIPT_CONTEXT=1` (off by default).** When set, the
-extracted text becomes fenced background context for the `scenes` vision call:
-an identification aid ("a large fish" can become "a mermaid" when the frames
+### Script as scene context
+
+Supplying a script **is** the switch — there is no flag to remember:
+
+```bash
+python3 -m drishti.pipeline --clip clip.mp4 --language hi-IN \
+    --script runs/scripts/<id>/script.md          # context on
+python3 -m drishti.pipeline --clip clip.mp4 --language hi-IN \
+    --script runs/scripts/<id>/script.md --no-script-context   # cast only
+```
+
+The text becomes fenced background context for the `scenes` vision call: an
+identification aid ("a large fish" can become "a mermaid" when the frames
 support it), never a source of beats or names — every beat must still be backed
-by frames, and names still enter only through `cast`. Enable per run with
-`--script runs/scripts/<id>/script.md` on the pipeline, or set the env var and
-drop a `script.md` into the job directory. With the flag off, the prompt is
-byte-identical to before the feature existed.
+by frames, and names still enter only through `cast`. `--no-script-context` (or
+`DRISHTI_SCRIPT_CONTEXT=0`) keeps a supplied script out of the vision prompt
+while still letting it inform casting. Give no script and the prompt is
+byte-identical to before this feature existed.
 
 ## dev vs demo
 

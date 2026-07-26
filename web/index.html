@@ -275,6 +275,29 @@
   .aside-card .body { margin-top: 1.2rem; }
   .aside-card .go { margin-top: 1.2rem; }
 
+  /* Upload / paste segmented toggle. Real buttons with aria-pressed, not
+     styled radios: two coarse choices, keyboard-reachable, 48px targets. */
+  .seg { display: inline-flex; border: 2px solid var(--line); border-radius: 10px;
+         overflow: hidden; margin-bottom: 1.1rem; }
+  .seg button {
+    font: inherit; font-size: .9rem; font-weight: 700;
+    min-height: 48px; padding: .6rem 1.2rem;
+    background: transparent; color: var(--muted); border: none; cursor: pointer;
+  }
+  .seg button + button { border-left: 2px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .seg button:hover:not([aria-pressed="true"]) { color: var(--text); }
+
+  textarea#script-text {
+    width: 100%; min-height: 10rem; resize: vertical;
+    font: inherit; font-size: .9rem; line-height: 1.5;
+    color: var(--text); background: var(--ink);
+    border: 2px solid var(--line); border-radius: 10px;
+    padding: .8rem .9rem;
+  }
+  textarea#script-text:hover { border-color: var(--muted); }
+  .script-pane[hidden] { display: none; }
+
   .script-out {
     margin-top: 1.2rem; padding: 1.1rem 1.2rem;
     background: var(--ink); border: 1px solid var(--line); border-radius: 10px;
@@ -415,35 +438,48 @@
     </section>
 
     <form class="aside-card" id="script-form" aria-labelledby="script-title">
-      <h2 id="script-title"><label for="script-pdf">Have the script? Add it too</label></h2>
+      <h2 id="script-title">Have the script? Add it too</h2>
       <p class="lede">Upload the screenplay as a PDF — or a photo of its pages —
-         and Sarvam Document Intelligence reads the written script out of it:
-         character names, scene headings and dialogue, in reading order.</p>
+         and Sarvam Document Intelligence reads the written script out of it.
+         Or just paste the text — a synopsis works as well as a full script.</p>
       <div class="body">
-        <label class="file-label" for="script-pdf">Choose a PDF or photo</label>
-        <input type="file" id="script-pdf" name="script-pdf"
-               accept="application/pdf,.pdf,image/png,image/jpeg,.png,.jpg,.jpeg">
-        <p class="picked" id="script-picked" aria-live="polite"></p>
+        <div class="seg" role="group" aria-label="How to add the script">
+          <button type="button" id="mode-upload" aria-pressed="true">Upload a file</button>
+          <button type="button" id="mode-paste" aria-pressed="false">Paste text</button>
+        </div>
 
-        <label class="or" for="script-language" style="letter-spacing:.14em">WRITTEN IN</label>
-        <select id="script-language" name="script-language">
-          <option value="en-IN" selected>English</option>
-          <option value="hi-IN">Hindi — हिन्दी</option>
-          <option value="bn-IN">Bengali — বাংলা</option>
-          <option value="gu-IN">Gujarati — ગુજરાતી</option>
-          <option value="kn-IN">Kannada — ಕನ್ನಡ</option>
-          <option value="ml-IN">Malayalam — മലയാളം</option>
-          <option value="mr-IN">Marathi — मराठी</option>
-          <option value="od-IN">Odia — ଓଡ଼ିଆ</option>
-          <option value="pa-IN">Punjabi — ਪੰਜਾਬੀ</option>
-          <option value="ta-IN">Tamil — தமிழ்</option>
-          <option value="te-IN">Telugu — తెలుగు</option>
-        </select>
+        <div class="script-pane" id="pane-upload">
+          <label class="file-label" for="script-pdf">Choose a PDF or photo</label>
+          <input type="file" id="script-pdf" name="script-pdf"
+                 accept="application/pdf,.pdf,image/png,image/jpeg,.png,.jpg,.jpeg">
+          <p class="picked" id="script-picked" aria-live="polite"></p>
+
+          <label class="or" for="script-language" style="letter-spacing:.14em">WRITTEN IN</label>
+          <select id="script-language" name="script-language">
+            <option value="en-IN" selected>English</option>
+            <option value="hi-IN">Hindi — हिन्दी</option>
+            <option value="bn-IN">Bengali — বাংলা</option>
+            <option value="gu-IN">Gujarati — ગુજરાતી</option>
+            <option value="kn-IN">Kannada — ಕನ್ನಡ</option>
+            <option value="ml-IN">Malayalam — മലയാളം</option>
+            <option value="mr-IN">Marathi — मराठी</option>
+            <option value="od-IN">Odia — ଓଡ଼ିଆ</option>
+            <option value="pa-IN">Punjabi — ਪੰਜਾਬੀ</option>
+            <option value="ta-IN">Tamil — தமிழ்</option>
+            <option value="te-IN">Telugu — తెలుగు</option>
+          </select>
+        </div>
+
+        <div class="script-pane" id="pane-paste" hidden>
+          <label class="or" for="script-text" style="letter-spacing:.14em">PASTE THE SCRIPT OR SYNOPSIS</label>
+          <textarea id="script-text" name="script-text" spellcheck="false"
+                    placeholder="Scene, synopsis, or the whole script — plain text."></textarea>
+        </div>
 
         <button type="submit" class="go" id="script-go">Read the script</button>
         <output class="status" id="script-status" aria-live="polite"></output>
-        <p class="hint"><kbd>S</kbd>jumps here. Up to 10 pages. Optional — the
-           described video does not need it.</p>
+        <p class="hint"><kbd>S</kbd>jumps here. Up to 10 pages when uploading.
+           Optional — the described video does not need it.</p>
         <pre class="script-out" id="script-out" hidden aria-label="Extracted script"></pre>
       </div>
     </form>
@@ -772,10 +808,14 @@
   say.addEventListener("click", startRecording);
 
   // ------------------------------------------------------------------
-  // Script pathway. A screenplay PDF goes to Sarvam Document Intelligence
-  // via our server; the written script comes back as text. It is a job API
-  // with its own queue, so the server answers with an id and we poll — the
-  // same contract as /api/describe, and for the same reason.
+  // Script pathway, two doors into the same place.
+  //
+  //   upload  a PDF or a page photo goes to Sarvam Document Intelligence via
+  //           our server. That is a job API with its own queue, so the server
+  //           answers with an id and we poll — same contract as /api/describe.
+  //   paste   text needs no parsing at all. The server saves it and answers
+  //           `done` in one round trip; polling still runs, and returns
+  //           immediately, so there is only ONE completion path to reason about.
   //
   // Nothing here touches the describe flow. Failure prints and stops.
   // ------------------------------------------------------------------
@@ -785,10 +825,34 @@
   const scriptLanguage = document.getElementById("script-language");
   const scriptStatus = document.getElementById("script-status");
   const scriptOut = document.getElementById("script-out");
-  // The last successfully parsed script. Sent along with describe; the server
-  // only acts on it when DRISHTI_SCRIPT_CONTEXT=1 is set, so with the flag off
-  // (the default) describe behaves exactly as if this never existed.
+  const scriptText = document.getElementById("script-text");
+  const modeUpload = document.getElementById("mode-upload");
+  const modePaste = document.getElementById("mode-paste");
+  const paneUpload = document.getElementById("pane-upload");
+  const panePaste = document.getElementById("pane-paste");
+  const scriptGo = document.getElementById("script-go");
+  // The last accepted script. Sent along with describe, where it becomes
+  // background context for scene understanding — adding one is the opt-in.
+  // Empty until a script is accepted, so describe is untouched without one.
   let scriptReadyId = "";
+
+  // "paste" | "upload". The toggle only swaps which pane is live — a script
+  // already accepted stays accepted, so switching modes never loses work.
+  let scriptMode = "upload";
+
+  function setScriptMode(mode) {
+    scriptMode = mode;
+    const pasting = mode === "paste";
+    modePaste.setAttribute("aria-pressed", String(pasting));
+    modeUpload.setAttribute("aria-pressed", String(!pasting));
+    panePaste.hidden = !pasting;
+    paneUpload.hidden = pasting;
+    scriptGo.textContent = pasting ? "Use this script" : "Read the script";
+    (pasting ? scriptText : scriptPdf).focus();
+  }
+
+  modeUpload.addEventListener("click", () => setScriptMode("upload"));
+  modePaste.addEventListener("click", () => setScriptMode("paste"));
 
   scriptPdf.addEventListener("change", () => {
     if (scriptPdf.files.length) {
@@ -804,47 +868,69 @@
     fetch("/api/script/" + scriptId).then((r) => r.json()).then((state) => {
       if (state.state === "done") {
         scriptReadyId = scriptId;
-        scriptOut.textContent = state.text || "(the PDF held no readable text)";
+        scriptOut.textContent = state.text || "(no readable text was found)";
         scriptOut.hidden = false;
-        const pages = state.pages ? state.pages + (state.pages === 1 ? " page" : " pages") : "the PDF";
-        scriptStatus.textContent = "Read " + pages + " — " + (state.characters || 0) + " characters below." +
+        // Pasted text reports no pages — say "Saved", not "Read 0 pages".
+        const read = state.pages
+          ? "Read " + state.pages + (state.pages === 1 ? " page" : " pages") + " — "
+          : "Script saved — ";
+        scriptStatus.textContent = read + (state.characters || 0) + " characters below." +
           (state.pages_failed ? "  " + state.pages_failed + " page(s) failed." : "");
-        speak("The script is ready. " + (state.characters || 0) + " characters read.");
+        speak("The script is ready. " + (state.characters || 0) + " characters.");
         return;
       }
       if (state.state === "error" || state.error) {
-        scriptStatus.textContent = "Could not read the script: " + (state.error || "unknown error");
+        scriptStatus.textContent = "Could not use the script: " + (state.error || "unknown error");
         return;
       }
       setTimeout(() => pollScript(scriptId), 1500);
     }).catch(() => { scriptStatus.textContent = "Lost contact with the server."; });
   }
 
-  scriptForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    if (!scriptPdf.files.length) {
-      scriptStatus.textContent = "Choose a PDF first — press S to jump to the file picker.";
-      scriptPdf.focus();
-      return;
-    }
-    const file = scriptPdf.files[0];
+  function sendScript(url, body, waiting) {
     scriptOut.hidden = true;
     scriptOut.textContent = "";
-    scriptStatus.textContent = "Uploading " + file.name + " — reading it can take up to a minute…";
-
-    const query = "?name=" + encodeURIComponent(file.name) +
-                  "&language=" + encodeURIComponent(scriptLanguage.value);
-    fetch("/api/script" + query, { method: "POST", body: file })
+    scriptStatus.textContent = waiting;
+    fetch(url, { method: "POST", body: body })
       .then((r) => r.json())
       .then((started) => {
         if (!started.script) throw new Error(started.error || "could not start");
-        scriptStatus.textContent = "Reading the script…";
         pollScript(started.script);
       })
       .catch((err) => {
         scriptStatus.textContent = "Could not start: " + err.message +
           ". Is the DRISHTI server running? Use “make web”.";
       });
+  }
+
+  scriptForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    if (scriptMode === "paste") {
+      const text = scriptText.value.trim();
+      if (!text) {
+        scriptStatus.textContent = "Paste the script or synopsis first.";
+        scriptText.focus();
+        return;
+      }
+      // Sent as a plain body, not a form field: the server reads it verbatim,
+      // so no escaping can mangle a screenplay's punctuation or Devanagari.
+      sendScript("/api/script-text",
+                 new Blob([text], { type: "text/plain; charset=utf-8" }),
+                 "Saving the script…");
+      return;
+    }
+
+    if (!scriptPdf.files.length) {
+      scriptStatus.textContent = "Choose a file first — press S to jump to the file picker.";
+      scriptPdf.focus();
+      return;
+    }
+    const file = scriptPdf.files[0];
+    const query = "?name=" + encodeURIComponent(file.name) +
+                  "&language=" + encodeURIComponent(scriptLanguage.value);
+    sendScript("/api/script" + query, file,
+               "Uploading " + file.name + " — reading it can take up to a minute…");
   });
 
   // Keyboard shortcuts. Never steal keys from a control the user is operating.
@@ -855,8 +941,8 @@
     "simply say it — in any language. Press W to name the characters, so " +
     "descriptions use their names. The default matches the video's own " +
     "language automatically. Press D to start describing. " +
-    "If you also have the screenplay as a PDF, press S to add it and Drishti " +
-    "will read the written script out of it. " +
+    "If you also have the script or a synopsis, press S to add it — upload a " +
+    "PDF or a photo of the pages, or paste the text in. " +
     "Press question mark to hear this again.";
 
   function speak(text) {
@@ -877,7 +963,7 @@
     else if (key === "v") { e.preventDefault(); say.focus(); startRecording(); }
     else if (key === "w") { e.preventDefault(); cast.focus(); }
     else if (key === "d") { e.preventDefault(); form.requestSubmit(); }
-    else if (key === "s") { e.preventDefault(); scriptPdf.focus(); }
+    else if (key === "s") { e.preventDefault(); (scriptMode === "paste" ? scriptText : scriptPdf).focus(); }
     else if (e.key === "?") { e.preventDefault(); speak(HELP); }
   });
 </script>
