@@ -14,9 +14,12 @@ key, and it must never ship inside page JavaScript. This keeps the key in
     POST /api/script    body: application/pdf -> {"script": "<id>"}
     GET  /api/script/<id>                ->  {"state", "text", "pages", …}
 
-`script` is a SEPARATE pathway, not a pipeline stage: a screenplay PDF goes to
-Sarvam Document Intelligence and the written script comes back as text on disk.
-Nothing in the describe flow reads it yet, so it can never affect a run.
+`script` is a SEPARATE pathway, not a pipeline stage: a screenplay PDF (or a
+page photo) goes to Sarvam Document Intelligence and the written script comes
+back as text on disk. If the page sends a parsed script id along with describe
+AND DRISHTI_SCRIPT_CONTEXT=1 is set, the text is handed to the pipeline as
+background context for scene understanding; with the flag off (the default)
+the id is ignored and describe behaves exactly as before.
 
 `describe` runs the real pipeline as a SUBPROCESS, never in-process: a stage
 that dies must not take the server with it, and the child's stdout is the log
@@ -38,6 +41,7 @@ select Hindi, not English.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -132,7 +136,13 @@ def hear(wav_bytes: bytes) -> dict:
     return {"language": language, "transcript": transcript, "heard": how}
 
 
-def start_job(video: bytes, filename: str, language: str, cast: str = "") -> str:
+def script_context_enabled() -> bool:
+    """Feature flag for script-as-context. Off by default, everywhere."""
+    return os.getenv("DRISHTI_SCRIPT_CONTEXT", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def start_job(video: bytes, filename: str, language: str, cast: str = "",
+              script_id: str = "") -> str:
     """Create a job directory, then run the pipeline on it in the background."""
     profile = get_profile("dev")
     suffix = Path(filename).suffix.lower() or ".mp4"
@@ -153,6 +163,15 @@ def start_job(video: bytes, filename: str, language: str, cast: str = "") -> str
         command += ["--language", language]
     if cast.strip():
         command += ["--cast", cast.strip()]
+
+    # A parsed script rides along only when the feature flag says so. The id is
+    # validated against the same shape as job ids and must resolve to a file we
+    # wrote — never a path from the client.
+    if script_id and script_context_enabled():
+        if JOB_ID.match(script_id):
+            script_md = (SCRIPTS_ROOT / script_id / "script.md").resolve()
+            if script_md.is_file() and script_md.is_relative_to(SCRIPTS_ROOT.resolve()):
+                command += ["--script", str(script_md)]
 
     def run() -> None:
         child = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE,
@@ -373,6 +392,7 @@ class Handler(BaseHTTPRequestHandler):
                     query.get("name", ["clip.mp4"])[0],
                     query.get("language", ["auto"])[0],
                     query.get("cast", [""])[0],
+                    query.get("script", [""])[0],
                 )
                 self._send_json(200, {"job": job_id})
             except Exception as exc:

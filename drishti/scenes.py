@@ -77,6 +77,12 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "max_output_tokens": 6000,
     "reasoning_effort": "low",
     "prompt_version": "scene-beats-v4",
+    # Script context (OFF by default). When enabled AND job/script.md exists,
+    # its text is injected into the prompt as fenced background material — an
+    # identification aid, never a source of events. With the flag off (or no
+    # script.md) the prompt is byte-identical to before this feature existed.
+    "use_script_context": False,
+    "script_context_max_chars": 6000,
 }
 
 ENV_PARAMS: dict[str, str] = {
@@ -106,6 +112,8 @@ ENV_PARAMS: dict[str, str] = {
     "max_output_tokens": "DRISHTI_SCENES_MAX_OUTPUT_TOKENS",
     "reasoning_effort": "DRISHTI_SCENES_REASONING_EFFORT",
     "prompt_version": "DRISHTI_SCENES_PROMPT_VERSION",
+    "use_script_context": "DRISHTI_SCRIPT_CONTEXT",
+    "script_context_max_chars": "DRISHTI_SCENES_SCRIPT_MAX_CHARS",
 }
 
 INT_PARAMS = {
@@ -121,6 +129,7 @@ INT_PARAMS = {
     "max_entity_details",
     "entity_description_max_words",
     "max_output_tokens",
+    "script_context_max_chars",
 }
 FLOAT_PARAMS = {
     "frame_fps",
@@ -131,7 +140,7 @@ FLOAT_PARAMS = {
     "confidence_max",
     "timestamp_tolerance_seconds",
 }
-BOOL_PARAMS = {"refine_long_beats", "require_evidence"}
+BOOL_PARAMS = {"refine_long_beats", "require_evidence", "use_script_context"}
 
 CANONICAL_BEAT_KEYS = (
     "start",
@@ -222,6 +231,7 @@ def _validate_params(params: dict[str, Any]) -> None:
         "tone_max_words",
         "max_entity_details",
         "entity_description_max_words",
+        "script_context_max_chars",
     )
     for name in positive:
         if params[name] <= 0:
@@ -388,6 +398,7 @@ def _prompt(
     *,
     refinement: bool,
     known_entity_details: dict[str, str] | None = None,
+    script_context: str = "",
 ) -> str:
     purpose = (
         "This is a targeted second look at a beat that may contain multiple "
@@ -400,8 +411,32 @@ def _prompt(
         if known_entity_details
         else "(none — create stable IDs for visually distinct people or characters)"
     )
+    # Fenced and instruction-wrapped, or not present at all. The context is an
+    # identification aid — it may make "a large fish" into "a mermaid" when the
+    # frames support it — never a source of beats: a synopsis describes what is
+    # SUPPOSED to happen, and reporting read-not-seen events with plausible
+    # evidence_frame_times would defeat the require_evidence check entirely.
+    # Names stay out too: they enter only through the cast stage, which
+    # verifies each one against the frames before narration may use it.
+    context_block = ""
+    if script_context.strip():
+        context_block = f"""
+<background_context>
+{script_context.strip()}
+</background_context>
+
+The tagged text above is background about the WHOLE work this clip is taken
+from (a synopsis or script). Use it only to better recognise what is already
+visible in the frames. It may describe events, people, and places that are NOT
+in this clip. Never report an event because the context mentions it: every
+beat must be backed by the supplied frames, and confidence must reflect visual
+support only, never consistency with this context. Do not copy proper names
+from it into summary, event text, or entity_details — those must stay purely
+visual descriptions.
+"""
     return f"""You are the visual evidence stage of an audio-description system.
 {purpose}
+{context_block}
 
 Analyze only the timestamp-labelled frames from {start:.3f}s through {end:.3f}s.
 Return factual, language-neutral visual scene beats covering that whole interval.
@@ -505,6 +540,7 @@ def _call_openai(
     *,
     refinement: bool,
     known_entity_details: dict[str, str] | None = None,
+    script_context: str = "",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": params["model"],
@@ -519,6 +555,7 @@ def _call_openai(
                         end,
                         refinement=refinement,
                         known_entity_details=known_entity_details,
+                        script_context=script_context,
                     ),
                     params["image_detail"],
                 ),
@@ -885,6 +922,25 @@ def understand(job: Path, cfg: dict[str, Any]) -> None:
     require_binary("ffmpeg")
     require_binary("ffprobe")
 
+    # Script context is opt-in twice over: the flag must be on AND the job must
+    # actually hold a script.md (written there by the pipeline's --script, from
+    # the script_doc pathway). Either one absent -> empty string -> the prompt
+    # is byte-identical to the pre-feature prompt.
+    script_context = ""
+    if params["use_script_context"]:
+        script_file = job / "script.md"
+        if script_file.is_file():
+            script_context = (
+                script_file.read_text(encoding="utf-8", errors="replace")
+                .strip()[: params["script_context_max_chars"]]
+            )
+            log(
+                f"  scenes: using script.md as background context "
+                f"({len(script_context)} chars)"
+            )
+        else:
+            log("  scenes: script context enabled but no script.md in job — continuing without")
+
     started = time.time()
     log(f"  scenes: input={video.name}, duration={duration:.3f}s")
     log(f"  scenes: settings saved to {job / PARAM_FILE}")
@@ -912,12 +968,16 @@ def understand(job: Path, cfg: dict[str, Any]) -> None:
         f"  scenes: extracted {len(base_frames)} frames; sending them to "
         f"{params['provider']} model {params['model']}"
     )
+    # Passed as **kwargs so that with no context the CALL is also identical —
+    # anything patched in place of _call_openai sees exactly the old signature.
+    context_kwargs = {"script_context": script_context} if script_context else {}
     raw = _call_openai(
         base_frames,
         params,
         0.0,
         duration,
         refinement=False,
+        **context_kwargs,
     )
     log(f"  scenes: model returned {len(raw.get('beats', []))} base beat(s); validating")
     normalized = normalize_analysis(
@@ -971,6 +1031,7 @@ def understand(job: Path, cfg: dict[str, Any]) -> None:
                     window_end,
                     refinement=True,
                     known_entity_details=dict(normalized["entity_details"]),
+                    **context_kwargs,
                 )
                 refined = normalize_analysis(
                     refined_raw,

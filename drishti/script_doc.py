@@ -10,7 +10,8 @@ Run it on its own, the same way every stage runs on its own:
     python3 -m drishti.script_doc path/to/script.pdf
 
 reads:
-    <pdf>                   one PDF (or ZIP of pages), <=200MB, <=10 pages
+    <pdf>                   one PDF, page image (PNG/JPG), or ZIP of pages;
+                            <=200MB, <=10 pages
 
 writes (into --out, default runs/scripts/<pdf stem>/):
     script.md               the extracted script, reading order preserved
@@ -71,6 +72,16 @@ MAX_BYTES = 200 * 1024 * 1024
 TERMINAL_OK = {"Completed", "PartiallyCompleted"}
 TERMINAL_BAD = {"Failed", "Cancelled"}
 
+# What the doc-digitization API accepts as an upload. A photo of a page is a
+# first-class input — Sarvam Vision OCRs it the same as a scanned PDF page.
+UPLOAD_TYPES = {
+    ".pdf": "application/pdf",
+    ".zip": "application/zip",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
+
 
 # --------------------------------------------------------------------------
 # HTTP — stdlib only, same retry temperament as common.py
@@ -122,7 +133,7 @@ def _put_file(url: str, path: Path) -> None:
         url,
         data=path.read_bytes(),
         headers={
-            "Content-Type": "application/pdf" if path.suffix.lower() == ".pdf" else "application/zip",
+            "Content-Type": UPLOAD_TYPES.get(path.suffix.lower(), "application/octet-stream"),
             "x-ms-blob-type": "BlockBlob",
         },
         method="PUT",
@@ -251,8 +262,9 @@ def extract_script(pdf: Path, out_dir: Path, cfg: dict | None = None) -> dict[st
     pdf = Path(pdf)
     if not pdf.is_file():
         raise SystemExit(f"No such file: {pdf}")
-    if pdf.suffix.lower() not in (".pdf", ".zip"):
-        raise SystemExit(f"Expected a .pdf or .zip, got {pdf.suffix or 'no extension'}")
+    if pdf.suffix.lower() not in UPLOAD_TYPES:
+        expected = ", ".join(sorted(UPLOAD_TYPES))
+        raise SystemExit(f"Expected one of {expected}, got {pdf.suffix or 'no extension'}")
     size = pdf.stat().st_size
     if size > MAX_BYTES:
         raise SystemExit(f"{pdf.name} is {size / 1e6:.0f}MB; the API limit is 200MB")
@@ -303,7 +315,8 @@ def extract_script(pdf: Path, out_dir: Path, cfg: dict | None = None) -> dict[st
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="extract the written script from a PDF via Sarvam Document Intelligence")
-    parser.add_argument("pdf", type=Path, help="screenplay PDF (or ZIP of page images)")
+    parser.add_argument("pdf", type=Path,
+                        help="screenplay PDF, a page photo (PNG/JPG), or a ZIP of page images")
     parser.add_argument("--out", type=Path, help=f"output dir, default {DEFAULT_OUT_ROOT}/<pdf stem>")
     parser.add_argument("--language", default=DEFAULT_LANGUAGE,
                         help=f"BCP-47 code the document is written in, default {DEFAULT_LANGUAGE}")

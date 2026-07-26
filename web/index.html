@@ -416,12 +416,13 @@
 
     <form class="aside-card" id="script-form" aria-labelledby="script-title">
       <h2 id="script-title"><label for="script-pdf">Have the script? Add it too</label></h2>
-      <p class="lede">Upload the screenplay as a PDF and Sarvam Document
-         Intelligence reads the written script out of it — character names,
-         scene headings and dialogue, in reading order.</p>
+      <p class="lede">Upload the screenplay as a PDF — or a photo of its pages —
+         and Sarvam Document Intelligence reads the written script out of it:
+         character names, scene headings and dialogue, in reading order.</p>
       <div class="body">
-        <label class="file-label" for="script-pdf">Choose a PDF</label>
-        <input type="file" id="script-pdf" name="script-pdf" accept="application/pdf,.pdf">
+        <label class="file-label" for="script-pdf">Choose a PDF or photo</label>
+        <input type="file" id="script-pdf" name="script-pdf"
+               accept="application/pdf,.pdf,image/png,image/jpeg,.png,.jpg,.jpeg">
         <p class="picked" id="script-picked" aria-live="polite"></p>
 
         <label class="or" for="script-language" style="letter-spacing:.14em">WRITTEN IN</label>
@@ -637,7 +638,8 @@
 
     const query = "?name=" + encodeURIComponent(file.name) +
                   "&language=" + encodeURIComponent(language.value) +
-                  "&cast=" + encodeURIComponent(cast.value.trim());
+                  "&cast=" + encodeURIComponent(cast.value.trim()) +
+                  (scriptReadyId ? "&script=" + encodeURIComponent(scriptReadyId) : "");
     fetch("/api/describe" + query, { method: "POST", body: file })
       .then((r) => r.json())
       .then((started) => {
@@ -783,6 +785,10 @@
   const scriptLanguage = document.getElementById("script-language");
   const scriptStatus = document.getElementById("script-status");
   const scriptOut = document.getElementById("script-out");
+  // The last successfully parsed script. Sent along with describe; the server
+  // only acts on it when DRISHTI_SCRIPT_CONTEXT=1 is set, so with the flag off
+  // (the default) describe behaves exactly as if this never existed.
+  let scriptReadyId = "";
 
   scriptPdf.addEventListener("change", () => {
     if (scriptPdf.files.length) {
@@ -797,6 +803,7 @@
   function pollScript(scriptId) {
     fetch("/api/script/" + scriptId).then((r) => r.json()).then((state) => {
       if (state.state === "done") {
+        scriptReadyId = scriptId;
         scriptOut.textContent = state.text || "(the PDF held no readable text)";
         scriptOut.hidden = false;
         const pages = state.pages ? state.pages + (state.pages === 1 ? " page" : " pages") : "the PDF";

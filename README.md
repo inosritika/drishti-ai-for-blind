@@ -101,9 +101,19 @@ make script PDF=path/to/screenplay.pdf     # -> runs/scripts/<name>/script.md
 ```
 
 Output lands in `runs/scripts/<name>/`: `script.md` (the script), `pages.json`
-(the API's structured page data), `script.json` (manifest) and `raw.zip`. In the
+(the API's structured page data), `script.json` (manifest) and `raw.zip`. Input
+can be a PDF, a photo of the pages (PNG/JPG), or a ZIP of page images. In the
 UI it is the “Have the script? Add it too” card — `POST /api/script`, then poll
-`GET /api/script/<id>`. Nothing consumes the text yet; it just lands on disk.
+`GET /api/script/<id>`.
+
+**Feature flag — `DRISHTI_SCRIPT_CONTEXT=1` (off by default).** When set, the
+extracted text becomes fenced background context for the `scenes` vision call:
+an identification aid ("a large fish" can become "a mermaid" when the frames
+support it), never a source of beats or names — every beat must still be backed
+by frames, and names still enter only through `cast`. Enable per run with
+`--script runs/scripts/<id>/script.md` on the pipeline, or set the env var and
+drop a `script.md` into the job directory. With the flag off, the prompt is
+byte-identical to before the feature existed.
 
 ## dev vs demo
 
