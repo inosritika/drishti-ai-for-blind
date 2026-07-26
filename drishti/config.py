@@ -197,19 +197,22 @@ TONE_PRESETS: dict[str, Tone] = {
     "tense": Tone(
         "tense", 0.20, 0.90,
         "Short clauses. Hard full stops. No adjectives that soften. "
-        "Let the shortness carry the pressure.",
+        "Let the shortness carry the pressure. Choose urgent physical verbs — "
+        "grabs, slams, lunges — never mild ones like moves or goes.",
     ),
     "energetic": Tone(
         "energetic", 0.30, 0.90,
         "Active verbs, present tense, one clause running into the next. "
-        "Keep it moving; never pause to qualify.",
+        "Keep it moving; never pause to qualify. Verbs of momentum — darts, "
+        "races, springs — over verbs of position.",
     ),
     # Only +0.10: comedy timing lives in the pause before the payoff, which the
     # register buys with punctuation. Rushing a joke kills it.
     "playful": Tone(
         "playful", 0.10, 1.00,
         "Set it up, then land it — a comma or dash before the payoff. "
-        "Understate the joke; never explain it.",
+        "Understate the joke; never explain it. Choose words that smile — "
+        "teeters, bumbles, triumphantly — and let precision be the humour.",
     ),
     # gentle and somber hold base pace on purpose — they slow the ear with
     # punctuation, not by stretching every syllable. See the note above.
