@@ -849,6 +849,7 @@
     if (state.video && player.getAttribute("src") !== state.video) {
       player.src = state.video;
       player.hidden = false;
+      delete player.dataset.retried;  // a new source gets its own retry
       // Setting src alone left Chrome's media element in NETWORK_EMPTY on the
       // completed-job view. Start the load explicitly so metadata, duration,
       // and native controls become available as soon as output.mp4 exists.
@@ -859,6 +860,15 @@
       // difference between "here is your video" and "here is a black box".
       player.addEventListener("loadedmetadata", () => {
         if (player.currentTime === 0) player.currentTime = 0.05;
+      }, { once: true });
+      // A media element that fails its load stays failed: nothing retries,
+      // because render() only touches src when the URL changes and it never
+      // does. One re-load costs nothing and turns a permanently black box
+      // back into a video.
+      player.addEventListener("error", () => {
+        if (player.dataset.retried) return;
+        player.dataset.retried = "1";
+        setTimeout(() => { player.load(); }, 600);
       }, { once: true });
     }
 
@@ -1120,6 +1130,7 @@
       drawMeter(analyser);
     }).catch(() => announce("Microphone was blocked — the list below works."));
   }
+
 
   say.addEventListener("click", startRecording);
 

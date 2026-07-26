@@ -239,7 +239,25 @@ def job_state(job_id: str) -> dict | None:
         "segments": read_json(job / "segments.json", default=[]) or [],
         "narration": read_json(job / "narration.json", default=[]) or [],
         "cast": read_json(job / "cast.json", default={}) or {},
-        "video": f"/jobs/{job_id}/output.mp4" if (job / "output.mp4").is_file() else None,
+        # Offer the video only once mix has actually finished. `is_file()` alone
+        # was true from the moment ffmpeg created output.mp4 and stayed true
+        # while it was still being written; a half-written faststart MP4 has no
+        # moov atom, so the browser got bytes it could not parse, gave up at
+        # readyState 0, and never retried because the src never changed. A
+        # fully cached run finishes inside one poll interval, so that race went
+        # the wrong way nearly every time.
+        #
+        # Two signals, either sufficient. `stage_timings["mix"]` is written only
+        # after the mix function returns, so it means the file is complete —
+        # this is what keeps a run that dies *after* mix from hiding a video
+        # that is perfectly good. `stage == "done"` covers the resumed run where
+        # mix was skipped because output.mp4 already existed and so recorded no
+        # timing of its own.
+        "video": (f"/jobs/{job_id}/output.mp4"
+                  if ((status.get("stage") == "done"
+                       or "mix" in (status.get("stage_timings") or {}))
+                      and (job / "output.mp4").is_file())
+                  else None),
         "log": LOGS.get(job_id, [])[-14:],
     }
 

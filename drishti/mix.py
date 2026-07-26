@@ -301,9 +301,20 @@ def render(job: Path, cfg: dict) -> None:
             f"Run the narrate and tts_fit stages first."
         )
 
+    # Render beside the real name, then rename into place. ffmpeg writes the
+    # container progressively and only moves the faststart moov atom to the
+    # front at the very end, so for the whole render output.mp4 would exist
+    # while being unplayable. Anything watching the job directory — the web
+    # UI, a file sync, a judge refreshing a folder — could pick that up and
+    # conclude the render is broken. os.replace is atomic within a directory,
+    # so output.mp4 now goes from absent to complete with nothing in between,
+    # and it appears only after the duration check has passed.
     destination = job / "output.mp4"
-    render_segments(job, segments, destination, duration, cfg)
-    check_output(destination, duration)
+    # Keep .mp4 last: ffmpeg picks the container from the extension.
+    staging = job / "output.part.mp4"
+    render_segments(job, segments, staging, duration, cfg)
+    check_output(staging, duration)
+    os.replace(staging, destination)
 
     log(f"  mix: {len(segments)} segment(s) ducked into {duration:.2f}s")
     for position, segment in enumerate(segments):
