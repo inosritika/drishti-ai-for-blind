@@ -339,6 +339,12 @@
     background: #000; display: block;
     box-shadow: 0 14px 40px rgb(0 0 0 / .45);
   }
+  /* `display: block` above is author-origin, so it beats the UA stylesheet's
+     [hidden] { display: none } and the hidden attribute stops working. Without
+     this line the player is an empty black rectangle for the whole run —
+     which reads as a broken video, especially on a cached run that reaches
+     `done` in under two seconds. */
+  video[hidden] { display: none; }
 
   .error-card {
     margin-top: 1.5rem; padding: 1rem 1.2rem;
@@ -847,6 +853,13 @@
       // completed-job view. Start the load explicitly so metadata, duration,
       // and native controls become available as soon as output.mp4 exists.
       player.load();
+      // preload="metadata" stops before decoding a picture, so the element
+      // paints its black background and looks like a video that failed. Nudge
+      // it off zero once metadata lands: that decodes one frame, which is the
+      // difference between "here is your video" and "here is a black box".
+      player.addEventListener("loadedmetadata", () => {
+        if (player.currentTime === 0) player.currentTime = 0.05;
+      }, { once: true });
     }
 
     // Facts: the numbers that show this was measured, not guessed.
