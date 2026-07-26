@@ -476,6 +476,43 @@
   const windows = document.getElementById("windows");
   const logBox = document.getElementById("log");
   const resultMeta = document.getElementById("result-meta");
+  let playerObjectUrl = null;
+
+  function loadCompletedVideo(videoPath) {
+    const videoUrl = apiUrl(videoPath);
+    if (player.dataset.source === videoUrl) return;
+    player.dataset.source = videoUrl;
+    player.hidden = false;
+
+    // Native <video src> requests cannot attach ngrok's required bypass
+    // header. Fetch the file ourselves, then give the media element a local
+    // Blob URL so the free ngrok warning page never replaces the MP4.
+    if (BACKEND_URL) {
+      player.removeAttribute("src");
+      player.load();
+      backendFetch(videoPath).then((response) => {
+        const type = response.headers.get("content-type") || "";
+        if (!response.ok || !type.startsWith("video/")) {
+          throw new Error("the server returned " + (type || "an invalid response") + " instead of the video");
+        }
+        return response.blob();
+      }).then((blob) => {
+        if (player.dataset.source !== videoUrl) return;
+        if (playerObjectUrl) URL.revokeObjectURL(playerObjectUrl);
+        playerObjectUrl = URL.createObjectURL(blob);
+        player.src = playerObjectUrl;
+        player.load();
+      }).catch((error) => {
+        if (player.dataset.source === videoUrl) {
+          barLabel.textContent = "Could not load the described video: " + error.message;
+        }
+      });
+      return;
+    }
+
+    player.src = videoUrl;
+    player.load();
+  }
 
   const STAGE_WORDS = {
     queued: "Queued", validate: "Checking the video", gaps: "Listening for dialogue-free windows",
@@ -516,14 +553,7 @@
     }
     resultMeta.textContent = bits.join(" · ");
 
-    if (state.video && player.getAttribute("src") !== state.video) {
-      player.src = apiUrl(state.video);
-      player.hidden = false;
-      // Setting src alone left Chrome's media element in NETWORK_EMPTY on the
-      // completed-job view. Start the load explicitly so metadata, duration,
-      // and native controls become available as soon as output.mp4 exists.
-      player.load();
-    }
+    if (state.video) loadCompletedVideo(state.video);
 
     // Facts: the numbers that show this was measured, not guessed.
     facts.replaceChildren();
@@ -599,7 +629,10 @@
     const file = clip.files[0];
     status.textContent = "Uploading " + file.name + "…";
     result.hidden = false;
-    player.hidden = true; player.removeAttribute("src");
+    if (playerObjectUrl) URL.revokeObjectURL(playerObjectUrl);
+    playerObjectUrl = null;
+    delete player.dataset.source;
+    player.hidden = true; player.removeAttribute("src"); player.load();
     facts.replaceChildren(); windows.replaceChildren();
     logBox.hidden = true;
     barFill.style.width = "0%";
