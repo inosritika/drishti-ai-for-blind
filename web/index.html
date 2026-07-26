@@ -446,7 +446,8 @@
 
   const STAGE_WORDS = {
     queued: "Queued", validate: "Checking the video", gaps: "Listening for dialogue-free windows",
-    scenes: "Watching the frames", align: "Matching what's seen to where it's quiet",
+    scenes: "Watching the frames", cast: "Working out who's who",
+    align: "Matching what's seen to where it's quiet",
     narrate: "Writing the description", tts_fit: "Speaking it and fitting it to the gap",
     mix: "Mixing it into your video", done: "Done",
   };
@@ -466,6 +467,14 @@
       : word + (state.stage === "done" ? "" : "…") + "  " + state.pct + "%";
 
     const bits = [];
+    // Show every binding: a wrong one cannot be prevented, only caught by eye.
+    const bindings = (state.cast && state.cast.bindings) || {};
+    for (const descriptor in bindings) {
+      bits.push(bindings[descriptor] + " = " + descriptor);
+    }
+    for (const name of (state.cast && state.cast.unmatched) || []) {
+      bits.push(name + " not recognised");
+    }
     if (state.output_language) bits.push("narrating in " + state.output_language);
     if (state.source_language) {
       bits.push("heard " + state.source_language +
