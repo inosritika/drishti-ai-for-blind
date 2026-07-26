@@ -112,6 +112,7 @@ STAGES: list[Stage] = [
     Stage("gaps", "gaps", "detect", "Nishant",
           ["gaps.json", "chunks.json", "transcript.txt", "language.json"]),
     Stage("scenes", "scenes", "understand", "Ritika", ["scenes.json"]),
+    Stage("align", "align", "plan", "Aryan", ["segments.json"]),
     Stage("narrate", "narrate", "write", "Tanishq", ["narration.json"],
           done=_narration_written),
     Stage("tts_fit", "speak", "synthesize", "Tanishq", [], done=_tts_done),

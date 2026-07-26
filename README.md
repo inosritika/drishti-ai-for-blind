@@ -27,11 +27,17 @@ directory.
 | `drishti/mix.py` | Nishant | `mix` — ducking + mux |
 | `drishti/scenes.py` | Ritika | `scenes` — visual beats |
 | `drishti/memory.py` | Ritika | entity registry (Increment 3) |
-| `drishti/narrate.py` | Tanishq | `narrate` — one line per gap |
+| `drishti/narrate.py` | Tanishq | `narrate` — one line per segment |
 | `drishti/speak.py` | Tanishq | `tts_fit` — Bulbul + fit loop |
+| `drishti/align.py` | Aryan | `align` — match beats to windows |
 | `drishti/common.py` · `config.py` · `pipeline.py` | Aryan | helpers, profiles, runner |
 
-Stage order: `validate → gaps → scenes → narrate → tts_fit → mix`
+Stage order: `validate → gaps → scenes → align → narrate → tts_fit → mix`
+
+`align` is the join between the two halves of the pipeline: Nishant says where
+it is quiet, Ritika says what is visible, and align decides which beats are
+available in which window and how many characters fit there. It does **not**
+decide what is worth saying — every beat it finds goes to `narrate` intact.
 
 `transcript` is **not** a stage — `gaps.py` writes `transcript.txt` from the
 Saaras chunks we already pay for. Never add a second STT call.
@@ -56,6 +62,7 @@ runs/dev/<job_id>/
   transcript.txt    Nishant
   language.json     Nishant
   scenes.json       Ritika
+  segments.json     Aryan
   narration.json    Tanishq
   narration_XX.wav  Tanishq
   output.mp4        Nishant

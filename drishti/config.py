@@ -57,6 +57,29 @@ FIT_TOLERANCE = 0.08      # a TTS render may exceed its window by this much
 GAP_TOLERANCE = 0.05      # float slop when comparing narration to gap bounds
 DURATION_TOLERANCE = 0.05  # output must preserve source duration within this
 
+# Characters per second through Bulbul v3 at pace 1.05, measured live today.
+# We budget narration in characters, never in seconds: asked for "at most four
+# seconds" the model returned a line that rendered in 6.23s, because seconds
+# mean nothing to it. Characters it can count.
+#
+# Latin script carries fewer sounds per character than an Indic abugida, so
+# English runs further per character. Anything unmeasured takes the slower
+# Indic rate — under-filling a window is recoverable, overrunning it is not.
+SPEECH_RATES: dict[str, float] = {"en-IN": 14.0}
+DEFAULT_SPEECH_RATE = 11.0
+# Aim short of the brim so the fit loop has room to re-pace instead of skip.
+BUDGET_MARGIN = 0.9
+
+
+def speech_rate(language: str | None) -> float:
+    """Characters per second we expect Bulbul to deliver in this language."""
+    return SPEECH_RATES.get(language or "", DEFAULT_SPEECH_RATE)
+
+
+def char_budget(seconds: float, language: str | None) -> int:
+    """How many characters of `language` fit in `seconds` of window."""
+    return max(0, int(seconds * speech_rate(language) * BUDGET_MARGIN))
+
 
 @dataclass(frozen=True)
 class Profile:

@@ -25,6 +25,7 @@ resolver picks. It should print `en-IN`.
 | `meta.json` | Nishant | validate |
 | `gaps.json`, `chunks.json`, `transcript.txt`, `language.json` | Nishant | gaps |
 | `scenes.json` | Ritika | scenes |
+| `segments.json` | Aryan | align |
 | `narration.json` | Tanishq | narrate (text) and tts_fit (wav fields) |
 | `status.json` | Aryan | written by the pipeline only — no stage touches it |
 
@@ -41,6 +42,13 @@ no language dominates.
 `narration.json` gains its `wav`, `wav_duration` and `pace` fields during
 `tts_fit`. Before that stage runs, an entry has only the text fields — which is
 why `make fixture` verifies with tolerance for a partial run.
+
+`segments.json` is what `narrate` actually reads. Note that its one segment
+carries **all five** beats and a `char_budget` of 163: align hands over
+everything that overlaps the window and leaves the editing to the model, since
+merging beats into a clause is a language problem, not a timing one. Each beat
+gains a `when` of `during`, `before` or `after` — `after` beats are look-ahead
+and must never be narrated as though they already happened.
 
 ## Want a Hindi fixture too?
 
