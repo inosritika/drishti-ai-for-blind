@@ -662,9 +662,22 @@
       const mb = (f.size / 1e6).toFixed(1);
       picked.innerHTML = "Selected: <strong></strong> (" + mb + " MB)";
       picked.querySelector("strong").textContent = f.name;
+      speakGuide(2, "Video added: " + f.name + ". Now choose the narration " +
+                    "language — press V and say its name, like Hindi, " +
+                    "or press L to pick from a list.");
     } else {
       picked.textContent = "";
     }
+  });
+
+  language.addEventListener("change", () => {
+    const label = language.options[language.selectedIndex].textContent.split(" — ")[0];
+    speakGuide(3, (language.value === "auto"
+        ? "I will match the video's own language. "
+        : "Language set to " + label + ". ") +
+      "If you know who's in it, press W and type the names. " +
+      "If you have the script, press S to add it. " +
+      "When you're ready, press D and I'll describe your video.");
   });
 
   // ------------------------------------------------------------------
@@ -939,6 +952,7 @@
     errorCard.hidden = false;
     stageLive.textContent = "The run stopped. " + message.split("\n")[0];
     status.textContent = "The run stopped — details below.";
+    speak("Sorry — the run stopped. " + message.split("\n")[0]);
     endRun(false);
   }
 
@@ -967,6 +981,7 @@
     e.preventDefault();
     if (!clip.files.length) {
       status.textContent = "Choose a video first — press U to jump to the file picker.";
+      speak("Please choose a video first — press U to jump to the file picker.");
       clip.focus();
       return;
     }
@@ -974,6 +989,7 @@
     const langLabel = language.options[language.selectedIndex].textContent;
     status.textContent = "Uploading " + file.name + " · " + langLabel +
       (cast.value.trim() ? " · " + cast.value.trim() : "") + "…";
+    speak("Describing your video now. You'll hear from me when it's ready.");
     startRun();
 
     // Read the script first, if there is one — the scenes stage needs it in the
@@ -1099,6 +1115,11 @@
         if (result.language && LANGUAGE_LABELS[result.language]) {
           language.value = result.language;
           announce("Selected " + LANGUAGE_LABELS[result.language] + " — " + result.heard + ".");
+          speakGuide(3, "Language set to " +
+            LANGUAGE_LABELS[result.language].split(" — ")[0] + ". " +
+            "If you know who's in it, press W and type the names. " +
+            "If you have the script, press S to add it. " +
+            "When you're ready, press D and I'll describe your video.");
         } else if (result.error) {
           announce("Voice failed (" + result.error + ") — the list below works.");
         } else {
@@ -1109,6 +1130,9 @@
   }
 
   function startRecording() {
+    // The page must never talk over an open microphone — its own voice
+    // would end up inside the language recording.
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     if (rec) { stopRecording(true); return; } // second press = done talking
     if (!navigator.mediaDevices || !window.AudioContext) {
       announce("No microphone available here — the list below works.");
@@ -1246,13 +1270,72 @@
     "Press D to start describing. " +
     "Press question mark to hear this again.";
 
-  function speak(text) {
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    window.speechSynthesis.speak(u);
+  // The browser default voice is often the slowest, flattest one installed.
+  // Prefer a known natural voice when present; fall back gracefully.
+  let guideVoice = null;
+  function pickVoice() {
+    try {
+      const voices = window.speechSynthesis.getVoices();
+      const prefer = ["Samantha", "Google US English", "Google UK English Female",
+                      "Google UK English Male", "Karen", "Daniel", "Moira", "Tessa"];
+      guideVoice = prefer.map((name) => voices.find((v) => v.name === name))
+                         .find(Boolean) ||
+                   voices.find((v) => v.lang && v.lang.startsWith("en")) || null;
+    } catch (err) { guideVoice = null; }
   }
+  if ("speechSynthesis" in window) {
+    pickVoice();
+    window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
+  }
+
+  function speak(text) {
+    // Voice is a layer over the page, never load-bearing: any failure here
+    // must leave the form working, so everything is guarded.
+    if (!("speechSynthesis" in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      if (guideVoice) u.voice = guideVoice;
+      u.rate = 1.22;
+      u.onstart = () => { if (pendingGuide === text) pendingGuide = null; };
+      window.speechSynthesis.speak(u);
+    } catch (err) { /* stay silent, stay working */ }
+  }
+
+  // ------------------------------------------------------------------
+  // Guided voice: the page walks the listener through the form, one
+  // instruction on arrival and the next each time a step is completed.
+  // guideStep only moves forward, so re-picking a file never repeats
+  // the walkthrough from the middle.
+  // ------------------------------------------------------------------
+  let guideStep = 0;
+  let pendingGuide = null;
+
+  function speakGuide(step, text) {
+    if (step <= guideStep) return;
+    guideStep = step;
+    pendingGuide = text;   // cleared by onstart once it is actually heard
+    speak(text);
+  }
+
+  // Browsers may refuse speech before the first user gesture. If the
+  // welcome never started, repeat the owed instruction on that gesture.
+  function retryGuide() {
+    if (!pendingGuide || !("speechSynthesis" in window)) return;
+    try { if (!window.speechSynthesis.speaking) speak(pendingGuide); }
+    catch (err) { /* voice is best-effort */ }
+  }
+  document.addEventListener("keydown", retryGuide, { once: true, capture: true });
+  document.addEventListener("pointerdown", retryGuide, { once: true, capture: true });
+
+  window.addEventListener("load", () => {
+    setTimeout(() => {
+      speakGuide(1, "Welcome to DRISHTI. It turns your video into an " +
+        "audio-described video. Please add your video — press U, then " +
+        "Enter, to choose the file. Press question mark any time to " +
+        "hear all the steps.");
+    }, 600);
+  });
 
   document.addEventListener("keydown", (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
