@@ -1,0 +1,556 @@
+<title>DRISHTI — Sprint Board</title>
+<style>
+  :root{
+    --bg:#F4F5F8; --panel:#FFFFFF; --panel-2:#EDEFF4; --line:#D9DDE7;
+    --ink:#161925; --ink-2:#3D4353; --ink-3:#6B7285;
+    --signal:#B87514; --signal-bg:#F7E6C8; --signal-line:#E8A33D;
+    --good:#2E7D57; --good-bg:#DDEFE5;
+    --risk:#B23F34; --risk-bg:#F8DFDC;
+    --aryan:#B87514; --nishant:#1F7C99; --ritika:#7A4FB5; --tanishq:#C0503C;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --r:7px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0E1017; --panel:#171A24; --panel-2:#1E222E; --line:#2B3040;
+      --ink:#EDEFF5; --ink-2:#B7BDCC; --ink-3:#818899;
+      --signal:#E8A33D; --signal-bg:#3A2C13; --signal-line:#E8A33D;
+      --good:#5FC08D; --good-bg:#16321F;
+      --risk:#E8776A; --risk-bg:#3A1B18;
+      --aryan:#E8A33D; --nishant:#57B6D6; --ritika:#B18AE6; --tanishq:#E8836D;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E1017; --panel:#171A24; --panel-2:#1E222E; --line:#2B3040;
+    --ink:#EDEFF5; --ink-2:#B7BDCC; --ink-3:#818899;
+    --signal:#E8A33D; --signal-bg:#3A2C13; --signal-line:#E8A33D;
+    --good:#5FC08D; --good-bg:#16321F;
+    --risk:#E8776A; --risk-bg:#3A1B18;
+    --aryan:#E8A33D; --nishant:#57B6D6; --ritika:#B18AE6; --tanishq:#E8836D;
+  }
+  :root[data-theme="light"]{
+    --bg:#F4F5F8; --panel:#FFFFFF; --panel-2:#EDEFF4; --line:#D9DDE7;
+    --ink:#161925; --ink-2:#3D4353; --ink-3:#6B7285;
+    --signal:#B87514; --signal-bg:#F7E6C8; --signal-line:#E8A33D;
+    --good:#2E7D57; --good-bg:#DDEFE5;
+    --risk:#B23F34; --risk-bg:#F8DFDC;
+    --aryan:#B87514; --nishant:#1F7C99; --ritika:#7A4FB5; --tanishq:#C0503C;
+  }
+
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;
+    -webkit-font-smoothing:antialiased;font-size:15px;}
+  .wrap{max-width:1140px;margin:0 auto;padding:28px 20px 72px;display:flex;flex-direction:column;gap:26px;}
+
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);}
+  h1{font-family:var(--mono);font-size:34px;letter-spacing:-.01em;font-weight:600;text-wrap:balance;margin:0;}
+  h2{font-family:var(--mono);font-size:13px;letter-spacing:.13em;text-transform:uppercase;
+    font-weight:600;color:var(--ink-2);margin:0;padding-bottom:9px;border-bottom:1px solid var(--line);}
+  h3{font-size:16px;font-weight:650;margin:0;text-wrap:balance;}
+  p{margin:0;max-width:68ch;}
+  section{display:flex;flex-direction:column;gap:14px;}
+  .lede{color:var(--ink-2);}
+
+  .masthead{display:flex;flex-direction:column;gap:12px;padding-bottom:22px;border-bottom:2px solid var(--ink);}
+  .facts{display:flex;flex-wrap:wrap;gap:8px;}
+  .fact{font-family:var(--mono);font-size:11.5px;padding:4px 9px;border:1px solid var(--line);
+    border-radius:99px;color:var(--ink-2);background:var(--panel);}
+  .fact.hi{border-color:var(--signal-line);color:var(--signal);background:var(--signal-bg);}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;
+    display:flex;flex-direction:column;gap:9px;}
+  .grid{display:grid;gap:14px;}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr));}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(232px,1fr));}
+
+  /* ---- decisions ---- */
+  .dec{border-left:3px solid var(--signal-line);background:var(--signal-bg);border-color:var(--signal-line);}
+  .dec .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--signal);}
+  .dec p{font-size:14px;color:var(--ink-2);}
+
+  /* ---- timeline ---- */
+  .tl{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);overflow:hidden;}
+  .tl-scroll{overflow-x:auto;}
+  .tl-in{min-width:940px;position:relative;}
+  .row{display:grid;grid-template-columns:120px 1fr;align-items:stretch;}
+  .rlabel{position:sticky;left:0;z-index:3;background:var(--panel);border-right:1px solid var(--line);
+    padding:9px 10px;display:flex;flex-direction:column;justify-content:center;gap:1px;}
+  .rlabel .nm{font-family:var(--mono);font-size:12.5px;font-weight:650;color:var(--own,var(--ink));}
+  .rlabel .rl{font-size:11px;color:var(--ink-3);}
+  .track{position:relative;height:64px;border-bottom:1px solid var(--line);}
+  .row:last-child .track{border-bottom:0;}
+  .axis{height:26px;position:relative;border-bottom:1px solid var(--line);background:var(--panel-2);}
+  .axis .tick{position:absolute;top:0;bottom:0;left:var(--s);border-left:1px solid var(--line);
+    padding-left:5px;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);display:flex;align-items:center;}
+  .grid-l{position:absolute;top:0;bottom:0;left:var(--s);border-left:1px solid var(--line);opacity:.55;pointer-events:none;}
+  .blk{position:absolute;left:var(--s);width:var(--w);top:7px;bottom:7px;border-radius:5px;
+    background:color-mix(in srgb,var(--own) 15%,transparent);
+    border:1px solid color-mix(in srgb,var(--own) 45%,transparent);
+    border-left:3px solid var(--own);
+    padding:5px 7px;font-size:11px;line-height:1.32;color:var(--ink-2);overflow:hidden;}
+  .blk b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--own);
+    text-transform:uppercase;margin-bottom:2px;}
+  .blk.crit{background:color-mix(in srgb,var(--risk) 16%,transparent);border-color:var(--risk);}
+  .blk.crit b{color:var(--risk);}
+  .gate{position:absolute;top:0;bottom:0;left:var(--s);width:2px;background:var(--signal-line);z-index:2;pointer-events:none;}
+  .gate.soft{background:transparent;border-left:2px dashed var(--ink-3);}
+  .gate span{position:absolute;top:3px;left:5px;font-family:var(--mono);font-size:10px;
+    letter-spacing:.06em;color:var(--signal);white-space:nowrap;background:var(--panel-2);padding:1px 4px;border-radius:3px;}
+  .gate.soft span{color:var(--ink-3);}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;padding:10px 14px;border-top:1px solid var(--line);
+    background:var(--panel-2);font-family:var(--mono);font-size:11px;color:var(--ink-3);}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:middle;}
+
+  /* ---- roles ---- */
+  .role{border-top:3px solid var(--own);}
+  .role .nm{font-family:var(--mono);font-size:15px;font-weight:650;color:var(--own);}
+  .role .vert{font-size:13px;color:var(--ink-2);}
+  .files{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px;}
+  .files code{font-family:var(--mono);font-size:11px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:4px;padding:2px 6px;color:var(--ink-2);}
+
+  /* ---- lists ---- */
+  ul,ol{margin:0;padding-left:19px;display:flex;flex-direction:column;gap:6px;color:var(--ink-2);max-width:68ch;}
+  li::marker{color:var(--ink-3);font-family:var(--mono);font-size:12px;}
+  .tight li{font-size:14px;}
+
+  /* ---- pipeline strip ---- */
+  .pipe{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+  .stg{font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:5px;background:var(--panel-2);
+    border:1px solid var(--line);color:var(--ink-2);}
+  .arw{color:var(--ink-3);font-size:11px;}
+
+  /* ---- tables ---- */
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);}
+  table{border-collapse:collapse;width:100%;min-width:520px;font-size:13.5px;}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+    text-align:left;padding:9px 13px;border-bottom:1px solid var(--line);background:var(--panel-2);font-weight:600;}
+  td{padding:9px 13px;border-bottom:1px solid var(--line);color:var(--ink-2);vertical-align:top;}
+  tr:last-child td{border-bottom:0;}
+  td code{font-family:var(--mono);font-size:11.5px;background:var(--panel-2);padding:1px 5px;border-radius:4px;}
+
+  /* ---- checklist ---- */
+  .chk{display:flex;flex-direction:column;gap:2px;}
+  .chk label{display:flex;gap:10px;align-items:flex-start;padding:7px 9px;border-radius:5px;cursor:pointer;
+    font-size:13.5px;color:var(--ink-2);}
+  .chk label:hover{background:var(--panel-2);}
+  .chk input{margin-top:3px;accent-color:var(--good);width:15px;height:15px;flex:none;}
+  .chk input:focus-visible{outline:2px solid var(--signal-line);outline-offset:2px;}
+  .chk input:checked + span{color:var(--ink-3);text-decoration:line-through;}
+
+  /* ---- contract file tree ---- */
+  .tree{font-family:var(--mono);font-size:12px;line-height:1.85;color:var(--ink-2);overflow-x:auto;}
+  .tree .own{color:var(--own);font-size:11px;}
+
+  /* ---- demo beats ---- */
+  .beat{display:grid;grid-template-columns:78px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid var(--line);}
+  .beat:last-child{border-bottom:0;}
+  .beat .t{font-family:var(--mono);font-size:12px;color:var(--signal);font-variant-numeric:tabular-nums;}
+  .beat .b{font-size:14px;color:var(--ink-2);}
+  .beat .b strong{color:var(--ink);font-weight:650;}
+
+  .cut{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
+  .cut .item{font-family:var(--mono);font-size:11.5px;padding:4px 9px;border-radius:99px;
+    border:1px solid var(--risk);color:var(--risk);background:var(--risk-bg);}
+  .cut .keep{border-color:var(--good);color:var(--good);background:var(--good-bg);}
+
+  .note{font-size:13px;color:var(--ink-3);max-width:68ch;}
+  .rejected{font-family:var(--mono);font-size:12px;color:var(--ink-3);}
+
+  @media (max-width:640px){
+    h1{font-size:26px;}
+    .wrap{padding:20px 14px 56px;}
+    .beat{grid-template-columns:64px 1fr;gap:10px;}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .card,.blk{transition:border-color .15s ease;}
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Sarvam Epoch Buildathon · Razorpay Arena · 26 July</div>
+    <h1>DRISHTI — Sprint Board</h1>
+    <p class="lede">Turns a short video into an audio-described video for blind and low-vision viewers.
+      Sarvam-30B writes the narration, Bulbul speaks it, and it lands only in the dialogue-free windows
+      Saaras finds — with the original soundtrack ducked underneath.</p>
+    <div class="facts">
+      <span class="fact hi">Capability declared: Voice (Saaras + Bulbul)</span>
+      <span class="fact">Sprint 10:30 → 16:30</span>
+      <span class="fact">M1 demo-ready by 12:30</span>
+      <span class="fact">4 verticals · zero shared files</span>
+      <span class="fact">Clips under 29.5s</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Open decisions — needed now</h2>
+    <div class="grid g2">
+      <div class="card dec">
+        <div class="tag">Decision 01 · blocks Tanishq</div>
+        <h3>Is clip A a Hindi clip, or English with a Hindi override?</h3>
+        <p>Auto-language routing means an English clip now produces <em>English</em> narration. The boardroom
+          clip is English, but the demo script says "approve the Hindi line" and closes on Indian languages.
+          Either pick a Hindi hero clip, or demo English→English first and flip the override to Hindi as the
+          second beat. This decides which clip gets trimmed first.</p>
+      </div>
+      <div class="card dec">
+        <div class="tag">Decision 02 · verify before promising</div>
+        <h3>Does Bulbul v3 support <code>en-IN</code>, and with which speaker?</h3>
+        <p>TTS covers fewer languages than text generation. If English speech isn't supported, an English clip
+          in auto mode pauses for language selection in the middle of the demo. Twenty-minute check, not a
+          3 PM discovery.</p>
+      </div>
+      <div class="card dec">
+        <div class="tag">Decision 03 · demo shape</div>
+        <h3>Live upload, or cached run on stage?</h3>
+        <p>A clip takes roughly two minutes to process and the live segment is two minutes long. A fresh
+          upload eats the entire window. Run the demo on a warm cache so it returns in seconds, say so
+          plainly, and keep a genuine fresh run ready if a judge asks.</p>
+      </div>
+      <div class="card dec">
+        <div class="tag">Decision 04 · unblocks three people</div>
+        <h3>Who writes the fixtures?</h3>
+        <p>One person hand-writing English and Hindi fixture jobs by 10:15 is a bottleneck three people wait
+          on. Better: Aryan freezes the field names and the job-dir skeleton, then each owner writes their
+          own output fixture. Still one author per file, so merge safety is unchanged.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The sprint — who is on what, when</h2>
+    <div class="tl">
+      <div class="tl-scroll">
+        <div class="tl-in">
+
+          <div class="row">
+            <div class="rlabel"><span class="rl">time</span></div>
+            <div class="axis">
+              <div class="tick" style="--s:0%">10:00</div>
+              <div class="tick" style="--s:15.4%">11:00</div>
+              <div class="tick" style="--s:30.8%">12:00</div>
+              <div class="tick" style="--s:46.2%">13:00</div>
+              <div class="tick" style="--s:61.5%">14:00</div>
+              <div class="tick" style="--s:76.9%">15:00</div>
+              <div class="tick" style="--s:92.3%">16:00</div>
+            </div>
+          </div>
+
+          <div class="row" style="--own:var(--aryan)">
+            <div class="rlabel"><span class="nm">Aryan</span><span class="rl">Integration</span></div>
+            <div class="track">
+              <div class="grid-l" style="--s:15.4%"></div><div class="grid-l" style="--s:30.8%"></div>
+              <div class="grid-l" style="--s:46.2%"></div><div class="grid-l" style="--s:61.5%"></div>
+              <div class="grid-l" style="--s:76.9%"></div><div class="grid-l" style="--s:92.3%"></div>
+              <div class="blk" style="--s:0%;--w:7.7%"><b>M0</b>schema + stubs</div>
+              <div class="blk" style="--s:7.7%;--w:26.9%"><b>pipeline.py</b>all-fixtures by 11:00, then substitute real modules · start api/</div>
+              <div class="blk" style="--s:38.5%;--w:19.2%"><b>Inc 1</b>FastAPI + React shell + transparency panel</div>
+              <div class="blk" style="--s:57.7%;--w:11.5%"><b>Inc 2</b>pause / resume + approval endpoint</div>
+              <div class="blk" style="--s:69.2%;--w:11.5%"><b>Inc 3</b>override + radio mode</div>
+              <div class="blk" style="--s:80.8%;--w:11.5%"><b>Inc 4</b>pause toggle + wiring</div>
+              <div class="blk" style="--s:92.3%;--w:7.7%"><b>Lock</b>submit</div>
+            </div>
+          </div>
+
+          <div class="row" style="--own:var(--nishant)">
+            <div class="rlabel"><span class="nm">Nishant</span><span class="rl">Listening · STT</span></div>
+            <div class="track">
+              <div class="grid-l" style="--s:15.4%"></div><div class="grid-l" style="--s:30.8%"></div>
+              <div class="grid-l" style="--s:46.2%"></div><div class="grid-l" style="--s:61.5%"></div>
+              <div class="grid-l" style="--s:76.9%"></div><div class="grid-l" style="--s:92.3%"></div>
+              <div class="blk" style="--s:0%;--w:7.7%"><b>M0</b>setup</div>
+              <div class="blk" style="--s:7.7%;--w:26.9%"><b>media + gaps</b>Saaras chunk gaps + language ID, then mix.py tone smoke test</div>
+              <div class="blk" style="--s:38.5%;--w:19.2%"><b>Inc 1</b>clips B &amp; C, tune padding</div>
+              <div class="blk" style="--s:57.7%;--w:23.1%"><b>Inc 2–3</b>three clean fresh runs + per-stage latency log</div>
+              <div class="blk" style="--s:80.8%;--w:11.5%"><b>Inc 4</b>pauses.py freeze-frame render</div>
+              <div class="blk" style="--s:92.3%;--w:7.7%"><b>Lock</b>verify</div>
+            </div>
+          </div>
+
+          <div class="row" style="--own:var(--ritika)">
+            <div class="rlabel"><span class="nm">Ritika</span><span class="rl">Seeing · Vision</span></div>
+            <div class="track">
+              <div class="grid-l" style="--s:15.4%"></div><div class="grid-l" style="--s:30.8%"></div>
+              <div class="grid-l" style="--s:46.2%"></div><div class="grid-l" style="--s:61.5%"></div>
+              <div class="grid-l" style="--s:76.9%"></div><div class="grid-l" style="--s:92.3%"></div>
+              <div class="blk" style="--s:0%;--w:7.7%"><b>M0</b>setup</div>
+              <div class="blk crit" style="--s:7.7%;--w:7.7%"><b>10:30 sharp</b>live OpenAI vision call — never tested</div>
+              <div class="blk" style="--s:15.4%;--w:19.2%"><b>scenes.py</b>harden + reviewed fallback JSON ×3</div>
+              <div class="blk" style="--s:38.5%;--w:19.2%"><b>Inc 1</b>scene quality, clips B &amp; C</div>
+              <div class="blk" style="--s:57.7%;--w:23.1%"><b>Inc 2–3</b>memory.py entity registry</div>
+              <div class="blk" style="--s:80.8%;--w:11.5%"><b>Inc 4</b>pause decision prompt</div>
+              <div class="blk" style="--s:92.3%;--w:7.7%"><b>Lock</b>verify</div>
+            </div>
+          </div>
+
+          <div class="row" style="--own:var(--tanishq)">
+            <div class="rlabel"><span class="nm">Tanishq</span><span class="rl">Speaking · Demo</span></div>
+            <div class="track">
+              <div class="grid-l" style="--s:15.4%"></div><div class="grid-l" style="--s:30.8%"></div>
+              <div class="grid-l" style="--s:46.2%"></div><div class="grid-l" style="--s:61.5%"></div>
+              <div class="grid-l" style="--s:76.9%"></div><div class="grid-l" style="--s:92.3%"></div>
+              <div class="blk crit" style="--s:0%;--w:10.3%"><b>by 10:40</b>trim clip A — everything waits on it</div>
+              <div class="blk" style="--s:10.3%;--w:24.4%"><b>narrate + speak</b>30B line per gap, Bulbul fit loop, on fixtures</div>
+              <div class="blk" style="--s:38.5%;--w:19.2%"><b>Inc 1</b>timeline + player · record fallback #2</div>
+              <div class="blk" style="--s:57.7%;--w:11.5%"><b>Inc 2</b>ApprovalCard</div>
+              <div class="blk" style="--s:69.2%;--w:11.5%"><b>Inc 3</b>Tamil + polished recording</div>
+              <div class="blk" style="--s:80.8%;--w:11.5%"><b>Inc 4</b>rehearse + final script</div>
+              <div class="blk" style="--s:92.3%;--w:7.7%"><b>Lock</b>rehearse</div>
+            </div>
+          </div>
+
+          <div class="gate" style="--s:38.5%"><span>12:30 · M1 GATE</span></div>
+          <div class="gate" style="--s:57.7%"><span>13:45</span></div>
+          <div class="gate" style="--s:80.8%"><span>15:15</span></div>
+          <div class="gate soft" style="--s:88.5%"><span>15:45 freeze?</span></div>
+          <div class="gate" style="--s:92.3%"><span>16:00 lockdown</span></div>
+
+        </div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--risk)"></i>critical path</span>
+        <span><i style="background:var(--signal-line)"></i>gate — everyone stops</span>
+        <span>Gates are demo-ready checkpoints: at each one we could stop and still show a complete product.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Four verticals — nobody edits anyone else's files</h2>
+    <p class="lede">Merging killed us last time. Git conflicts need two people in one file, so no two people
+      are ever in one file. The verticals talk to each other only through JSON in <code>jobs/&lt;id&gt;/</code>.</p>
+    <div class="grid g4">
+      <div class="card role" style="--own:var(--aryan)">
+        <span class="nm">Aryan</span>
+        <span class="vert">Integration — contracts, orchestrator, API, web shell, language resolution</span>
+        <div class="files"><code>pipeline.py</code><code>common.py</code><code>api/</code><code>web/ shell</code><code>fixtures/</code></div>
+      </div>
+      <div class="card role" style="--own:var(--nishant)">
+        <span class="nm">Nishant</span>
+        <span class="vert">Listening — audio in and audio out, including source-language detection</span>
+        <div class="files"><code>media.py</code><code>gaps.py</code><code>mix.py</code></div>
+      </div>
+      <div class="card role" style="--own:var(--ritika)">
+        <span class="nm">Ritika</span>
+        <span class="vert">Seeing — visual understanding, kept language-neutral</span>
+        <div class="files"><code>scenes.py</code><code>memory.py</code><code>scene_fallbacks/</code></div>
+      </div>
+      <div class="card role" style="--own:var(--tanishq)">
+        <span class="nm">Tanishq</span>
+        <span class="vert">Speaking — narration and speech in the resolved language, plus the demo itself</span>
+        <div class="files"><code>narrate.py</code><code>speak.py</code><code>web/components/</code><code>demo/</code></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>The five rules that keep it merge-free</h3>
+      <ol class="tight">
+        <li><strong>One owner per path.</strong> Need a change in someone's file? Message them. Never edit it yourself.</li>
+        <li><strong>Contracts are frozen fixtures, committed first.</strong> Once committed, those shapes are the interface. Shape changes go through Aryan and get announced out loud.</li>
+        <li><strong>Every module runs standalone.</strong> <code>python -m drishti.gaps jobs/test1/</code> reads the job dir, writes its own JSON, prints a summary. You test your vertical without anyone else's code.</li>
+        <li><strong>Integration by substitution.</strong> The pipeline runs end-to-end from 11:00 with every stage faked. Real modules swap in one at a time — a late module never blocks the gate.</li>
+        <li><strong>Trunk-based, tiny commits.</strong> Straight to <code>main</code> every 20–30 minutes, <code>git pull --rebase</code> before every push. Disjoint files make every rebase automatic.</li>
+      </ol>
+      <p class="note"><code>common.py</code> is frozen once the sprint starts — but make it additive-only:
+        new functions may be appended, existing ones never modified or renamed. That keeps merges trivial
+        while leaving an escape valve at 11:30.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The contract — the only shared surface</h2>
+    <div class="grid g2">
+      <div class="card">
+        <h3>Job directory</h3>
+        <div class="tree">
+jobs/&lt;id&gt;/
+  input.mp4
+  status.json      <span class="own" style="--own:var(--aryan)">Aryan</span>
+  gaps.json        <span class="own" style="--own:var(--nishant)">Nishant</span>
+  chunks.json      <span class="own" style="--own:var(--nishant)">Nishant</span>
+  transcript.txt   <span class="own" style="--own:var(--nishant)">Nishant</span>
+  language.json    <span class="own" style="--own:var(--nishant)">Nishant</span>
+  scenes.json      <span class="own" style="--own:var(--ritika)">Ritika</span>
+  narration.json   <span class="own" style="--own:var(--tanishq)">Tanishq</span>
+  narration_XX.wav <span class="own" style="--own:var(--tanishq)">Tanishq</span>
+  output.mp4       <span class="own" style="--own:var(--nishant)">Nishant</span>
+        </div>
+        <p class="note">Modules never write <code>status.json</code> — only the pipeline does. New job dir per
+          upload, always: a stale chunk cache on a different clip poisons everything downstream.</p>
+      </div>
+      <div class="card">
+        <h3>Stages and endpoints</h3>
+        <div class="pipe">
+          <span class="stg">validate</span><span class="arw">→</span>
+          <span class="stg">gaps</span><span class="arw">→</span>
+          <span class="stg">scenes</span><span class="arw">→</span>
+          <span class="stg">transcript</span><span class="arw">→</span>
+          <span class="stg">narrate</span><span class="arw">→</span>
+          <span class="stg">tts_fit</span><span class="arw">→</span>
+          <span class="stg">mix</span><span class="arw">→</span>
+          <span class="stg">done</span>
+        </div>
+        <ul class="tight">
+          <li><code>POST /jobs</code> — video + <code>{language:"auto"}</code> → <code>{job_id}</code></li>
+          <li><code>GET /jobs/{id}</code> — status, detected and output language, artifact links</li>
+          <li><code>POST /jobs/{id}/narration/{n}</code> — approve or edit a line</li>
+          <li><code>GET /jobs/{id}/artifacts/…</code></li>
+        </ul>
+        <p class="note">Two places the pipeline stops for a human — language selection and narration
+          approval. Build one generic <code>awaiting</code> state and one resume endpoint, not two bespoke flows.
+          In Saaras chunk mode the transcript already comes out of gap detection, so
+          <code>transcript</code> must not fire a second STT call.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Source-language routing — the M1 invariant</h2>
+    <p class="lede">DRISHTI describes a video in the language spoken in it, unless someone explicitly asks for
+      translation. English video, English narration. Hindi video, Devanagari Hindi narration. The pipeline
+      never silently defaults to Hindi.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Who</th><th>Does what</th><th>Never does</th></tr></thead>
+        <tbody>
+          <tr><td><strong style="color:var(--nishant)">Nishant</strong></td>
+            <td>Keeps Saaras's <code>language_code</code> and probability per spoken chunk, picks the
+              duration-weighted dominant language, writes <code>language.json</code>.</td>
+            <td>Guess. Under two speech chunks, confidence below 0.70, or no dominant language → write
+              <code>unknown</code>.</td></tr>
+          <tr><td><strong style="color:var(--aryan)">Aryan</strong></td>
+            <td>Resolves one <code>output_language</code>, normalizes to Sarvam codes, records it in status,
+              passes it to every downstream stage.</td>
+            <td>Fall back to <code>hi-IN</code>. Unknown, mixed, or unsupported → pause for selection.</td></tr>
+          <tr><td><strong style="color:var(--tanishq)">Tanishq</strong></td>
+            <td>Consumes the resolved language in both narration and TTS, validates the script before any
+              audio is mixed.</td>
+            <td>Re-decide the language, or hardcode Hindi anywhere.</td></tr>
+          <tr><td><strong style="color:var(--ritika)">Ritika</strong></td>
+            <td>Produces stable factual visual evidence that 30B can render into any language.</td>
+            <td>Select the narration language.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>12:30 gate — all four watch it together</h2>
+    <p class="lede">Aryan calls pass or fail. On a fail: name the single failed item, its owner gets twenty
+      minutes, otherwise substitute the fixture and move to Increment 1. Nobody waits.</p>
+    <div class="card">
+      <div class="chk">
+        <label><input type="checkbox"><span>Narration sits fully inside the padded gap</span></label>
+        <label><input type="checkbox"><span>Zero dialogue overlap — verified by ear, on headphones</span></label>
+        <label><input type="checkbox"><span>Detected source language equals output language in auto mode</span></label>
+        <label><input type="checkbox"><span>English input produces English; Hindi input produces Devanagari</span></label>
+        <label><input type="checkbox"><span>Narration and TTS used the same language code</span></label>
+        <label><input type="checkbox"><span>Exactly one narration per gap</span></label>
+        <label><input type="checkbox"><span>Source duration preserved to the frame</span></label>
+        <label><input type="checkbox"><span>Final MP4 has both video and audio streams</span></label>
+        <label><input type="checkbox"><span>It plays on the demo laptop, at room volume</span></label>
+        <label><input type="checkbox"><span>Copied to <code>demo/</code> as fallback #1 — never touched again</span></label>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Increments — each one leaves us demo-ready</h2>
+    <div class="grid g2">
+      <div class="card">
+        <h3>Increment 1 · Web product <span class="eyebrow">12:30 → 13:45</span></h3>
+        <p>CLI becomes "upload in a browser, watch it think, play the result." The evidence timeline is the
+          centrepiece: dialogue in red, narration-safe windows in green, scene beats beneath. The narration
+          card also shows <em>withheld details</em> — what the system refused to narrate.</p>
+        <p class="note">Check: live browser upload of clip A, end to end. Screen-record it — fallback #2.</p>
+      </div>
+      <div class="card">
+        <h3>Increment 2 · Human approval <span class="eyebrow">13:45 → 14:30</span></h3>
+        <p>The pipeline pauses at narration; the line appears in the UI; edit or approve, then TTS continues.
+          Broadcasters really do approve AD scripts before recording. It's also a hallucination safety net —
+          and stage insurance, because we never play a line we haven't read.</p>
+      </div>
+      <div class="card">
+        <h3>Increment 3 · Memory and language <span class="eyebrow">14:30 → 15:15</span></h3>
+        <p>Entity memory carries characters across clips, so part two says "the same man in the grey suit"
+          instead of describing him from scratch. Build that consistency version first; binding a spoken
+          name to a face is the harder second step. Explicit Hindi ⇄ Tamil override lands here too.</p>
+        <p class="note">Check: full product. Record the polished fallback and test the volume now, not at 4 PM.</p>
+      </div>
+      <div class="card">
+        <h3>Increment 4 · Smart context pauses <span class="eyebrow">15:15 → 16:00</span></h3>
+        <p>When no gap is long enough for essential context, the video freezes, Bulbul explains, and it
+          resumes — real practice, called extended audio description. Capped at two pauses. Same renderer
+          gives a scene-setting intro at t=0 almost free.</p>
+        <p class="note">New file <code>pauses.py</code> — never edit a working mixer at 3 PM.</p>
+      </div>
+    </div>
+    <p class="rejected"><strong>Rejected, do not reopen:</strong> voice cloning · WhatsApp or Twilio delivery ·
+      realtime description · long videos. After 1 PM the answer to new scope is the cut list.</p>
+  </section>
+
+  <section>
+    <h2>The three minutes that decide it</h2>
+    <div class="card">
+      <div class="beat"><span class="t">0:00–0:30</span><span class="b"><strong>The problem, plainly.</strong>
+        34 million blind and low-vision Indians. Almost no Indian-language content carries audio description.
+        Play five seconds with the screen hidden: this is what a film is for a blind viewer.</span></div>
+      <div class="beat"><span class="t">0:30–1:00</span><span class="b"><strong>How it's done today.</strong>
+        A scriptwriter, a voice artist, a sound engineer. Days of turnaround, lakhs per hour of content —
+        so in Hindi and Tamil it simply doesn't get made.</span></div>
+      <div class="beat"><span class="t">1:00–3:00</span><span class="b"><strong>Live.</strong> Upload → the
+        evidence timeline fills in ("the music never stops; energy detection can't find these windows —
+        Saaras can") → approve the line on screen → play it. Then one line each: the language flip, part two
+        remembering the character, one context pause. Close on the outcome, not the stack.</span></div>
+    </div>
+    <p class="note">Presenter: Tanishq. Laptop: Aryan. Rehearsed twice, timed. The fallback recording stays
+      one keypress away — if the network stalls, narrate over it without apologising.</p>
+    <div class="cut">
+      <span class="eyebrow" style="margin-right:4px">Cut in this order</span>
+      <span class="item">context pauses</span>
+      <span class="item">Tamil toggle</span>
+      <span class="item">entity memory</span>
+      <span class="item">human approval</span>
+      <span class="keep">never cut: fallback recordings · 3-clip verification · rehearsal</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>What could go wrong</h2>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Risk</th><th>What we've already done about it</th></tr></thead>
+        <tbody>
+          <tr><td>Merge conflicts</td><td>One owner per path, frozen fixtures, standalone modules, substitution, rebase-pull</td></tr>
+          <tr><td>A module runs late</td><td>Its fixture stays in the pipeline; the gate passes; it lands next increment</td></tr>
+          <tr><td>Vision API misbehaves — never live-tested</td><td>Tested at 10:30 sharp; reviewed fallback JSON per clip; vision is a sensor, not the scored capability</td></tr>
+          <tr><td>Rate limits or venue Wi-Fi</td><td>Disk cache on every call, keyed by content hash; all three clips cached by 15:15; two fallback recordings</td></tr>
+          <tr><td>English video gets Hindi narration</td><td>Auto by default, evidence separated from policy, script validated before mixing, pause instead of guess</td></tr>
+          <tr><td>30B returns English, Hinglish, or truncated JSON</td><td>Plain-text output, explicit script instruction, ratio validator, human approval</td></tr>
+          <tr><td>TTS overruns the gap</td><td>Measure, re-pace, shorten once, then skip. Never trust a promised duration</td></tr>
+          <tr><td>Demo laptop audio dies on stage</td><td>Tested on venue speakers at lunch; phone recording as last resort</td></tr>
+          <tr><td>Disqualification over prior work</td><td>Reference script never enters the repo; prior API exploration flagged in <code>IDEA_SCOPE.md</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Aryan's backlog — for the gaps between integrations</h2>
+    <div class="card">
+      <ol class="tight">
+        <li><strong>Content-hashed response cache</strong> in <code>common.py</code>, before the freeze. Makes
+          reruns free, and makes the on-stage demo return in seconds.</li>
+        <li><strong>Transparency panel</strong> — per-stage latency and API call counts. When a judge asks
+          whether this really works, we show receipts. Also produces the real number behind "about two minutes."</li>
+        <li><strong>Accessible UI pass</strong> — keyboard-navigable player, aria labels, visible focus. An
+          accessibility product whose own interface is usable by a screen reader.</li>
+        <li><strong>Radio mode</strong> — one-click MP3 of the described mix. Blind users often just listen.</li>
+        <li><strong>QR hand-off</strong> — judges play the result on their own phone. Only if everything else
+          is green; never promise it.</li>
+      </ol>
+    </div>
+  </section>
+
+</div>
