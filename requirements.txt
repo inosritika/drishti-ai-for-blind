@@ -1,0 +1,5 @@
+# The pipeline itself is standard library only — it needs nothing here.
+# These are for the API layer, which lands after the 12:30 gate.
+fastapi
+uvicorn[standard]
+python-multipart
