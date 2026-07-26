@@ -80,6 +80,29 @@ TTS_PACE_MIN, TTS_PACE_MAX = 0.5, 2.0
 TTS_TEMPERATURE_MIN, TTS_TEMPERATURE_MAX = 0.01, 1.0
 BASE_TTS_PACE = 1.05
 
+# Measured pace sweep on a 126-character English line, live:
+#
+#   pace   duration   chars/s   speed-up vs 1.05   efficiency
+#   1.05     6.64s      18.96         1.00x          100%
+#   1.25     5.31s      23.74         1.25x          105%
+#   1.35     5.40s      23.33         1.23x           96%
+#   1.40     4.86s      25.93         1.37x          103%
+#   1.50     4.60s      27.41         1.45x          101%
+#
+# Two things follow. Delivery scales essentially linearly to 1.5 with no
+# plateau, so a faster tone really does buy proportionally more content — the
+# char_budget scaling is sound. But Bulbul is not monotonic at fine grain:
+# 1.25 and 1.30 rendered identically and 1.35 came out *slower* than 1.30.
+# Pace steps below ~0.10 are inside that noise, so tone deltas are spaced
+# wider than that or they are not really distinct.
+#
+# The ceiling that matters is not the API's 2.0 but speak.py's MAX_PACE (1.5),
+# where the fit loop gives up and starts shortening. A tone opening at 1.40
+# leaves the loop only 7% room to re-pace before it must cut words; at 1.35 it
+# has 11%. That is why the fastest tone stops at 1.35 rather than 1.40 — the
+# last 0.05 buys ~2% more content and costs a third of the recovery margin.
+MAX_TONE_PACE = 1.35
+
 
 def speech_rate(language: str | None) -> float:
     """Characters per second we expect Bulbul to deliver in this language."""
@@ -155,17 +178,19 @@ TONE_PRESETS: dict[str, Tone] = {
         "Plain, even description. Say what is there and stop.",
     ),
     "tense": Tone(
-        "tense", 0.10, 0.90,
+        "tense", 0.20, 0.90,
         "Short clauses. Hard full stops. No adjectives that soften. "
         "Let the shortness carry the pressure.",
     ),
     "energetic": Tone(
-        "energetic", 0.18, 0.90,
+        "energetic", 0.30, 0.90,
         "Active verbs, present tense, one clause running into the next. "
         "Keep it moving; never pause to qualify.",
     ),
+    # Only +0.10: comedy timing lives in the pause before the payoff, which the
+    # register buys with punctuation. Rushing a joke kills it.
     "playful": Tone(
-        "playful", 0.08, 1.00,
+        "playful", 0.10, 1.00,
         "Set it up, then land it — a comma or dash before the payoff. "
         "Understate the joke; never explain it.",
     ),
